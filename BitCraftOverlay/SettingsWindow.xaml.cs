@@ -40,7 +40,9 @@ public partial class SettingsWindow : Window
     private void OpenDataFolder_Click(object sender, RoutedEventArgs e)
     {
         Directory.CreateDirectory(Settings.AppDataRoot); // so Explorer has something to open even on first run
-        Process.Start(new ProcessStartInfo(Settings.AppDataRoot) { UseShellExecute = true });
+        // ShellExecute on a bare folder path is flaky in some hosting contexts; launching
+        // explorer.exe directly with the path as an argument is the reliable way to do this.
+        Process.Start("explorer.exe", $"\"{Settings.AppDataRoot}\"");
     }
 
     private async void CheckUpdate_Click(object sender, RoutedEventArgs e)
