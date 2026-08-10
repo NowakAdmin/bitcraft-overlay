@@ -12,6 +12,32 @@
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="0" GlassFrameThickness="0" ResizeBorderThickness="0" CornerRadius="0"/>
     </shell:WindowChrome.WindowChrome>
+    <Window.Resources>
+        <!-- The default Windows button template ignores Foreground for its text in
+             some themes (renders black regardless) - this bare template fixes that
+             and adds a subtle hover instead. Applies to every Button in this window. -->
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Opacity" Value="0.75"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
     <!-- Always fully opaque, regardless of the content window's transparency setting,
          so the user can never slider their way into losing access to these controls. -->
     <Grid Background="Transparent"
@@ -25,16 +51,16 @@
                     Background="Transparent" Foreground="White" BorderThickness="0"/>
             <Button x:Name="TabBrico" Content="Brico" Padding="8,0" Height="28" Click="Tab_Click"
                     Background="Transparent" Foreground="White" BorderThickness="0"/>
-            <Button x:Name="TabMapa" Content="Mapa" Padding="8,0" Height="28" Click="Tab_Click"
+            <Button x:Name="TabMapa" Content="Map" Padding="8,0" Height="28" Click="Tab_Click"
                     Background="Transparent" Foreground="White" BorderThickness="0"/>
-            <Button Content="Twitch" Padding="8,0" Height="28" Margin="4,0,0,0" Click="Twitch_Click"
-                    ToolTip="Otwórz twitch.tv/bitcraftonline w osobnym oknie (obejrzyj stream, zbieraj dropy)"
-                    Background="#9146FF" Foreground="White" BorderThickness="0" FontWeight="SemiBold"/>
+            <Button x:Name="TwitchButton" Content="Twitch" Padding="8,0" Height="28" Margin="4,0,0,0" Click="Twitch_Click"
+                    ToolTip="Open twitch.tv/bitcraftonline in a separate window (watch the stream, collect drops)"
+                    Background="Transparent" Foreground="White" BorderThickness="0"/>
         </StackPanel>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button Content="▭" Width="28" Height="28" Click="ResetSize_Click" ToolTip="Przywróć domyślny rozmiar"
+            <Button Content="▭" Width="28" Height="28" Click="ResetSize_Click" ToolTip="Reset to default size"
                     Background="Transparent" Foreground="White" BorderThickness="0" FontSize="11"/>
-            <Button Content="–" Width="28" Height="28" Click="Minimize_Click" ToolTip="Zwiń"
+            <Button Content="–" Width="28" Height="28" Click="Minimize_Click" ToolTip="Collapse"
                     Background="Transparent" Foreground="White" BorderThickness="0" FontSize="16"/>
             <Button Content="⚙" Width="28" Height="28" Click="Settings_Click"
                     Background="Transparent" Foreground="White" BorderThickness="0"/>

@@ -12,37 +12,29 @@ public partial class SettingsWindow : Window
     private const string RepoName = "bitcraft-overlay";
 
     public string ShareCode { get; private set; } = "";
-    public int TransparencyPercent { get; private set; }
     public List<string> HiddenTabs { get; private set; } = new();
+    public bool UseIconTabs { get; private set; }
 
-    private readonly Action<int> _onTransparencyPreview;
-    private readonly int _originalTransparency;
-
-    public SettingsWindow(string currentShareCode, int currentTransparency, List<string> hiddenTabs, Action<int> onTransparencyPreview)
+    public SettingsWindow(string currentShareCode, List<string> hiddenTabs, bool useIconTabs)
     {
         InitializeComponent();
         ShareCodeBox.Text = currentShareCode;
-        _originalTransparency = currentTransparency;
-        _onTransparencyPreview = onTransparencyPreview;
-        TransparencySlider.Value = currentTransparency; // fires ValueChanged, sets TransparencyPercent + label
 
+        UseIconsToggle.IsChecked = useIconTabs;
         ShowBitcraftSync.IsChecked = !hiddenTabs.Contains("BitcraftSync");
         ShowBitjita.IsChecked = !hiddenTabs.Contains("Bitjita");
         ShowBrico.IsChecked = !hiddenTabs.Contains("Brico");
         ShowMapa.IsChecked = !hiddenTabs.Contains("Mapa");
+        ShowTwitch.IsChecked = !hiddenTabs.Contains("Twitch");
 
-        VersionLabel.Text = $"Wersja {CurrentVersion}";
+        VersionLabel.Text = $"Version {CurrentVersion}";
         Loaded += (_, _) => ShareCodeBox.Focus();
     }
 
     private static string CurrentVersion => Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
 
-    private void TransparencySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-    {
-        TransparencyPercent = (int)e.NewValue;
-        TransparencyLabel.Text = $"{TransparencyPercent}%";
-        _onTransparencyPreview(TransparencyPercent); // live preview so the user sees what they're setting
-    }
+    private void Kofi_Click(object sender, RoutedEventArgs e) =>
+        Process.Start(new ProcessStartInfo("https://ko-fi.com/Z6O024TDK7") { UseShellExecute = true });
 
     private async void CheckUpdate_Click(object sender, RoutedEventArgs e)
     {
@@ -65,11 +57,11 @@ public partial class SettingsWindow : Window
             if (isNewer)
                 Process.Start(new ProcessStartInfo(releaseUrl) { UseShellExecute = true });
             else
-                MessageBox.Show("Masz już najnowszą wersję.", "BitCraft Overlay", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show("You already have the latest version.", "BitCraft Overlay", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch
         {
-            MessageBox.Show("Nie udało się sprawdzić aktualizacji (brak internetu albo nie ma jeszcze żadnego release'u).",
+            MessageBox.Show("Couldn't check for updates (no internet, or no release published yet).",
                 "BitCraft Overlay", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally
@@ -91,18 +83,17 @@ public partial class SettingsWindow : Window
         code = code.Split('?', '#')[0];
         ShareCode = code.Trim('/', ' ');
 
+        UseIconTabs = UseIconsToggle.IsChecked == true;
+
         HiddenTabs = new List<string>();
         if (ShowBitcraftSync.IsChecked != true) HiddenTabs.Add("BitcraftSync");
         if (ShowBitjita.IsChecked != true) HiddenTabs.Add("Bitjita");
         if (ShowBrico.IsChecked != true) HiddenTabs.Add("Brico");
         if (ShowMapa.IsChecked != true) HiddenTabs.Add("Mapa");
+        if (ShowTwitch.IsChecked != true) HiddenTabs.Add("Twitch");
 
         DialogResult = true;
     }
 
-    private void Cancel_Click(object sender, RoutedEventArgs e)
-    {
-        _onTransparencyPreview(_originalTransparency); // undo the live preview
-        DialogResult = false;
-    }
+    private void Cancel_Click(object sender, RoutedEventArgs e) => DialogResult = false;
 }

@@ -13,11 +13,11 @@ public class Settings
     public string LastTab { get; set; } = "BitcraftSync";
     public string BitcraftSyncShareCode { get; set; } = "";
 
-    /// <summary>0-90: how transparent the content window is (header bar is exempt).</summary>
-    public int OverlayTransparencyPercent { get; set; } = 0;
-
     /// <summary>Tab names hidden from the header bar. Empty = all visible (default).</summary>
     public List<string> HiddenTabs { get; set; } = new();
+
+    /// <summary>Show each service's favicon instead of its text label on the tab bar.</summary>
+    public bool UseIconTabs { get; set; } = false;
 
     /// <summary>Last full URL visited per tab (e.g. bitcraftmap.com encodes its view in the URL) - restored on next open instead of the tab's plain default.</summary>
     public Dictionary<string, string> LastTabUrls { get; set; } = new();

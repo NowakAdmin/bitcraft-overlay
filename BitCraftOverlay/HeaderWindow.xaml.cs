@@ -1,11 +1,29 @@
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media.Imaging;
 
 namespace BitCraftOverlay;
 
 /// <summary>Thin, always-opaque toolbar. All the actual logic lives on the content window - this just forwards clicks.</summary>
 public partial class HeaderWindow : Window
 {
+    private static readonly Dictionary<string, string> TabLabels = new()
+    {
+        ["BitcraftSync"] = "BitcraftSync",
+        ["Bitjita"] = "Bitjita",
+        ["Brico"] = "Brico",
+        ["Mapa"] = "Map",
+    };
+
+    private static readonly Dictionary<string, string> TabIconPaths = new()
+    {
+        ["BitcraftSync"] = "pack://application:,,,/Assets/icons/bitcraftsync.ico",
+        ["Bitjita"] = "pack://application:,,,/Assets/icons/bitjita.ico",
+        ["Brico"] = "pack://application:,,,/Assets/icons/brico.ico",
+        ["Mapa"] = "pack://application:,,,/Assets/icons/bitcraftmap.png",
+    };
+
     private readonly MainWindow _content;
     private TwitchWindow? _twitchWindow;
     private bool _dragging;
@@ -51,6 +69,50 @@ public partial class HeaderWindow : Window
         TabBitjita.Visibility = hidden.Contains("Bitjita") ? Visibility.Collapsed : Visibility.Visible;
         TabBrico.Visibility = hidden.Contains("Brico") ? Visibility.Collapsed : Visibility.Visible;
         TabMapa.Visibility = hidden.Contains("Mapa") ? Visibility.Collapsed : Visibility.Visible;
+        TwitchButton.Visibility = hidden.Contains("Twitch") ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private const string TwitchTooltip = "Open twitch.tv/bitcraftonline in a separate window (watch the stream, collect drops)";
+    private const string TwitchIconPath = "pack://application:,,,/Assets/icons/twitch.ico";
+
+    internal void ApplyDisplayMode(bool useIcons)
+    {
+        SetTabContent(TabBitcraftSync, "BitcraftSync", useIcons);
+        SetTabContent(TabBitjita, "Bitjita", useIcons);
+        SetTabContent(TabBrico, "Brico", useIcons);
+        SetTabContent(TabMapa, "Mapa", useIcons);
+
+        if (useIcons)
+        {
+            TwitchButton.Content = new Image { Source = new BitmapImage(new Uri(TwitchIconPath)), Width = 16, Height = 16 };
+            TwitchButton.Padding = new Thickness(7, 0, 7, 0);
+        }
+        else
+        {
+            TwitchButton.Content = "Twitch";
+            TwitchButton.Padding = new Thickness(8, 0, 8, 0);
+        }
+        TwitchButton.ToolTip = TwitchTooltip; // keep the explanatory tooltip in both modes
+    }
+
+    private static void SetTabContent(Button button, string tab, bool useIcons)
+    {
+        if (useIcons)
+        {
+            button.Content = new Image
+            {
+                Source = new BitmapImage(new Uri(TabIconPaths[tab])),
+                Width = 16, Height = 16,
+            };
+            button.ToolTip = TabLabels[tab];
+            button.Padding = new Thickness(7, 0, 7, 0);
+        }
+        else
+        {
+            button.Content = TabLabels[tab];
+            button.ToolTip = null;
+            button.Padding = new Thickness(8, 0, 8, 0);
+        }
     }
 
     private void Twitch_Click(object sender, RoutedEventArgs e)

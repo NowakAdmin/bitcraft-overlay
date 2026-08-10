@@ -5,16 +5,5 @@
         Title="Twitch - BitCraft Online"
         Width="960" Height="680"
         Background="#18181B" Foreground="White">
-    <Grid>
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-        </Grid.RowDefinitions>
-
-        <Border Grid.Row="0" Background="#18181B" Padding="6,4">
-            <Button x:Name="MuteButton" Content="🔊 Wycisz" HorizontalAlignment="Left" Padding="10,3" Click="Mute_Click"/>
-        </Border>
-
-        <wv2:WebView2 x:Name="Browser" Grid.Row="1" Source="https://www.twitch.tv/bitcraftonline"/>
-    </Grid>
+    <wv2:WebView2 x:Name="Browser" Source="https://www.twitch.tv/bitcraftonline"/>
 </Window>

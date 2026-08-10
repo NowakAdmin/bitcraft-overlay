@@ -3,7 +3,6 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Threading;
-using Microsoft.Web.WebView2.Core;
 
 namespace BitCraftOverlay;
 
@@ -57,35 +56,23 @@ public partial class MainWindow : Window
         saveTimer.Start();
     }
 
-    // --- Alt+Tab visibility / transparency -------------------------------------
+    // --- Alt+Tab visibility -----------------------------------------------------
 
     // No more WS_EX_NOACTIVATE: it blocked all keyboard focus, so typing never
     // worked anywhere in the overlay (settings, search boxes on bitjita/brico...).
     // Testing showed BitCraft doesn't minimize when it loses focus, so the whole
     // reason for that lockout doesn't apply - the window now activates normally.
-    // WS_EX_LAYERED lets us fade the whole window via SetLayeredWindowAttributes
-    // (constant alpha, DWM-composited - unlike WPF's AllowsTransparency this
-    // doesn't break the hosted WebView2 control). WS_EX_TOOLWINDOW hides it from Alt+Tab.
+    // WS_EX_TOOLWINDOW hides it from Alt+Tab.
     private void MainWindow_SourceInitialized(object? sender, EventArgs e)
     {
         _hwnd = new WindowInteropHelper(this).Handle;
         var exStyle = NativeMethods.GetWindowLong(_hwnd, NativeMethods.GWL_EXSTYLE);
-        NativeMethods.SetWindowLong(_hwnd, NativeMethods.GWL_EXSTYLE,
-            exStyle | NativeMethods.WS_EX_TOOLWINDOW | NativeMethods.WS_EX_LAYERED);
-        ApplyOpacity(_settings.OverlayTransparencyPercent);
-    }
-
-    /// <summary>0-90% transparency, i.e. opacity never drops below 10% - the overlay can never make itself fully invisible.</summary>
-    internal void ApplyOpacity(int transparencyPercent)
-    {
-        var opacityPercent = 100 - Math.Clamp(transparencyPercent, 0, 90);
-        var alpha = (byte)(255 * opacityPercent / 100);
-        NativeMethods.SetLayeredWindowAttributes(_hwnd, 0, alpha, NativeMethods.LWA_ALPHA);
+        NativeMethods.SetWindowLong(_hwnd, NativeMethods.GWL_EXSTYLE, exStyle | NativeMethods.WS_EX_TOOLWINDOW);
     }
 
     // --- Startup positioning / restore --------------------------------------
 
-    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         Width = _settings.WindowWidth;
         Height = _settings.WindowHeight;
@@ -100,14 +87,6 @@ public partial class MainWindow : Window
             PositionOverGameWindow();
         }
 
-        // WebView2 normally renders through DirectComposition/GPU, which bypasses
-        // SetLayeredWindowAttributes entirely - the page content stayed 100% opaque
-        // no matter the alpha we set on the window. Disabling GPU compositing forces
-        // a plain composited surface DWM can actually alpha-blend with the desktop.
-        var options = new CoreWebView2EnvironmentOptions { AdditionalBrowserArguments = "--disable-gpu-compositing" };
-        var env = await CoreWebView2Environment.CreateAsync(null, null, options);
-        await Browser.EnsureCoreWebView2Async(env);
-
         ShowTab(_settings.LastTab);
 
         // The header is a separate, always-opaque window docked directly above this
@@ -118,6 +97,7 @@ public partial class MainWindow : Window
         _header.Width = Width;
         _header.Top = Top - _header.Height;
         _header.ApplyHiddenTabs(_settings.HiddenTabs);
+        _header.ApplyDisplayMode(_settings.UseIconTabs);
         _header.Show();
 
         _header.LocationChanged += (_, _) =>
@@ -230,16 +210,17 @@ public partial class MainWindow : Window
 
     internal void OpenSettings(Window owner)
     {
-        var dialog = new SettingsWindow(_settings.BitcraftSyncShareCode, _settings.OverlayTransparencyPercent, _settings.HiddenTabs, ApplyOpacity) { Owner = owner };
+        var dialog = new SettingsWindow(_settings.BitcraftSyncShareCode, _settings.HiddenTabs, _settings.UseIconTabs) { Owner = owner };
         if (dialog.ShowDialog() == true)
         {
             _settings.BitcraftSyncShareCode = dialog.ShareCode;
-            _settings.OverlayTransparencyPercent = dialog.TransparencyPercent;
             _settings.HiddenTabs = dialog.HiddenTabs;
+            _settings.UseIconTabs = dialog.UseIconTabs;
             _settings.LastTabUrls.Remove("BitcraftSync");
             _dirty = true;
             _settings.Save();
             _header?.ApplyHiddenTabs(_settings.HiddenTabs);
+            _header?.ApplyDisplayMode(_settings.UseIconTabs);
 
             if (_settings.HiddenTabs.Contains(_currentTab))
             {
@@ -250,10 +231,6 @@ public partial class MainWindow : Window
             {
                 ShowTab("BitcraftSync");
             }
-        }
-        else
-        {
-            ApplyOpacity(_settings.OverlayTransparencyPercent); // Cancel already reverts via the preview callback, this just guarantees it.
         }
     }
 }
