@@ -59,7 +59,10 @@ dotnet build
 dotnet run
 ```
 
-Or skip building it yourself and grab a ready-to-run build from the [Releases page](https://github.com/NowakAdmin/bitcraft-overlay/releases).
+Or skip building it yourself and grab a ready-to-run build from the [Releases page](https://github.com/NowakAdmin/bitcraft-overlay/releases) - two options are published with each release:
+
+- **BitCraftOverlay.exe** - self-contained, includes the .NET 8 runtime. Just download and run.
+- **BitCraftOverlay-requires-dotnet8.zip** - much smaller, but needs the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) installed separately.
 
 ## Status
 
