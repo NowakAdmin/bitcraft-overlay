@@ -69,6 +69,7 @@ public partial class HeaderWindow : Window
         TabBitjita.Visibility = hidden.Contains("Bitjita") ? Visibility.Collapsed : Visibility.Visible;
         TabBrico.Visibility = hidden.Contains("Brico") ? Visibility.Collapsed : Visibility.Visible;
         TabMapa.Visibility = hidden.Contains("Mapa") ? Visibility.Collapsed : Visibility.Visible;
+        TabCalc.Visibility = hidden.Contains("Calc") ? Visibility.Collapsed : Visibility.Visible;
         TwitchButton.Visibility = hidden.Contains("Twitch") ? Visibility.Collapsed : Visibility.Visible;
     }
 
@@ -81,6 +82,10 @@ public partial class HeaderWindow : Window
         SetTabContent(TabBitjita, "Bitjita", useIcons);
         SetTabContent(TabBrico, "Brico", useIcons);
         SetTabContent(TabMapa, "Mapa", useIcons);
+
+        // No favicon exists for our own native tool, so use an emoji glyph instead of an Image.
+        TabCalc.Content = useIcons ? "🧮" : "Calc";
+        TabCalc.Padding = useIcons ? new Thickness(7, 0, 7, 0) : new Thickness(8, 0, 8, 0);
 
         if (useIcons)
         {

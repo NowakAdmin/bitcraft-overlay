@@ -81,6 +81,10 @@
             <TextBlock Text="Map" VerticalAlignment="Center" Margin="8,0,0,0"/>
         </StackPanel>
         <StackPanel Style="{StaticResource ToggleRow}">
+            <ToggleButton x:Name="ShowCalc" Style="{StaticResource ToggleSwitch}"/>
+            <TextBlock Text="Calc" VerticalAlignment="Center" Margin="8,0,0,0"/>
+        </StackPanel>
+        <StackPanel Style="{StaticResource ToggleRow}">
             <ToggleButton x:Name="ShowTwitch" Style="{StaticResource ToggleSwitch}"/>
             <TextBlock Text="Twitch" VerticalAlignment="Center" Margin="8,0,0,0"/>
         </StackPanel>

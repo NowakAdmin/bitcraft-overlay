@@ -1,5 +1,7 @@
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Threading;
@@ -26,11 +28,14 @@ public partial class MainWindow : Window
     private bool _dirty;
     private nint _hwnd;
     private HeaderWindow? _header;
+    private readonly ObservableCollection<CalcEntry> _calcHistory;
 
     public MainWindow()
     {
         InitializeComponent();
         Browser.CreationProperties = new CoreWebView2CreationProperties { UserDataFolder = Settings.WebView2DataFolder };
+        _calcHistory = new ObservableCollection<CalcEntry>(_settings.SavedCalculations);
+        CalcHistoryList.ItemsSource = _calcHistory;
         SourceInitialized += MainWindow_SourceInitialized;
         Loaded += MainWindow_Loaded;
         Closing += (_, _) => SaveWindowState();
@@ -193,9 +198,88 @@ public partial class MainWindow : Window
     {
         _currentTab = tab;
         _settings.LastTab = tab;
+
+        if (tab == "Calc")
+        {
+            Browser.Visibility = Visibility.Collapsed;
+            CalcPanel.Visibility = Visibility.Visible;
+            return;
+        }
+
+        CalcPanel.Visibility = Visibility.Collapsed;
+        Browser.Visibility = Visibility.Visible;
         Browser.Source = new Uri(_settings.LastTabUrls.TryGetValue(tab, out var savedUrl) && !string.IsNullOrWhiteSpace(savedUrl)
             ? savedUrl
             : DefaultUrlFor(tab));
+    }
+
+    // --- Calc: start/stop rate tool -------------------------------------------
+
+    private void CalcStartNow_Click(object sender, RoutedEventArgs e) =>
+        CalcStartTimeBox.Text = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+
+    private void CalcStopNow_Click(object sender, RoutedEventArgs e) =>
+        CalcStopTimeBox.Text = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+
+    private void CalcField_Changed(object sender, TextChangedEventArgs e) =>
+        CalcRateLabel.Text = TryParseCalcForm(out var entry) ? $"{entry.RateDisplay}" : "—";
+
+    private bool TryParseCalcForm(out CalcEntry entry)
+    {
+        entry = new CalcEntry();
+        if (!DateTime.TryParse(CalcStartTimeBox.Text, out var startTime)) return false;
+        if (!DateTime.TryParse(CalcStopTimeBox.Text, out var stopTime)) return false;
+        if (!double.TryParse(CalcStartValueBox.Text, out var startValue)) return false;
+        if (!double.TryParse(CalcStopValueBox.Text, out var stopValue)) return false;
+
+        entry.StartUnix = new DateTimeOffset(startTime).ToUnixTimeSeconds();
+        entry.StopUnix = new DateTimeOffset(stopTime).ToUnixTimeSeconds();
+        entry.StartValue = startValue;
+        entry.StopValue = stopValue;
+        return entry.StopUnix > entry.StartUnix;
+    }
+
+    private void CalcSave_Click(object sender, RoutedEventArgs e)
+    {
+        if (!TryParseCalcForm(out var entry))
+        {
+            MessageBox.Show("Fill in a valid start time, stop time, and both values first (stop must be after start).",
+                "BitCraft Overlay", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        entry.Name = string.IsNullOrWhiteSpace(CalcNameBox.Text) ? $"Calc {_calcHistory.Count + 1}" : CalcNameBox.Text.Trim();
+
+        var existing = _calcHistory.FirstOrDefault(c => string.Equals(c.Name, entry.Name, StringComparison.OrdinalIgnoreCase));
+        if (existing != null)
+        {
+            var result = MessageBox.Show($"A saved calculation named \"{entry.Name}\" already exists. Overwrite it?",
+                "BitCraft Overlay", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (result != MessageBoxResult.Yes) return;
+            _calcHistory.Remove(existing);
+        }
+
+        _calcHistory.Insert(0, entry); // newest first
+        _settings.SavedCalculations = _calcHistory.ToList();
+        _settings.Save();
+    }
+
+    private void CalcDelete_Click(object sender, RoutedEventArgs e)
+    {
+        if (CalcHistoryList.SelectedItem is not CalcEntry entry) return;
+        _calcHistory.Remove(entry);
+        _settings.SavedCalculations = _calcHistory.ToList();
+        _settings.Save();
+    }
+
+    private void CalcHistory_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (CalcHistoryList.SelectedItem is not CalcEntry entry) return;
+
+        CalcStartTimeBox.Text = DateTimeOffset.FromUnixTimeSeconds(entry.StartUnix).LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
+        CalcStopTimeBox.Text = DateTimeOffset.FromUnixTimeSeconds(entry.StopUnix).LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
+        CalcStartValueBox.Text = entry.StartValue.ToString();
+        CalcStopValueBox.Text = entry.StopValue.ToString();
+        CalcNameBox.Text = entry.Name;
     }
 
     private string DefaultUrlFor(string tab) => tab switch
@@ -226,7 +310,7 @@ public partial class MainWindow : Window
 
             if (_settings.HiddenTabs.Contains(_currentTab))
             {
-                var firstVisible = new[] { "BitcraftSync", "Bitjita", "Brico", "Mapa" }.FirstOrDefault(t => !_settings.HiddenTabs.Contains(t));
+                var firstVisible = new[] { "BitcraftSync", "Bitjita", "Brico", "Mapa", "Calc" }.FirstOrDefault(t => !_settings.HiddenTabs.Contains(t));
                 if (firstVisible != null) ShowTab(firstVisible);
             }
             else if (_settings.LastTab == "BitcraftSync")
