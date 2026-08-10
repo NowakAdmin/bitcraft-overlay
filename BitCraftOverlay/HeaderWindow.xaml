@@ -53,6 +53,9 @@
                     Background="Transparent" Foreground="White" BorderThickness="0"/>
             <Button x:Name="TabMapa" Content="Map" Padding="8,0" Height="28" Click="Tab_Click"
                     Background="Transparent" Foreground="White" BorderThickness="0"/>
+            <Button x:Name="TabCalc" Content="Calc" Padding="8,0" Height="28" Click="Tab_Click"
+                    ToolTip="Start/stop rate calculator (e.g. XP per hour)"
+                    Background="Transparent" Foreground="White" BorderThickness="0"/>
             <Button x:Name="TwitchButton" Content="Twitch" Padding="8,0" Height="28" Margin="4,0,0,0" Click="Twitch_Click"
                     ToolTip="Open twitch.tv/bitcraftonline in a separate window (watch the stream, collect drops)"
                     Background="Transparent" Foreground="White" BorderThickness="0"/>
