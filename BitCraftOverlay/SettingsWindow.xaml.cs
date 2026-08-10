@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using System.Net.Http;
 using System.Reflection;
 using System.Text.Json;
@@ -35,6 +36,12 @@ public partial class SettingsWindow : Window
 
     private void Kofi_Click(object sender, RoutedEventArgs e) =>
         Process.Start(new ProcessStartInfo("https://ko-fi.com/Z6O024TDK7") { UseShellExecute = true });
+
+    private void OpenDataFolder_Click(object sender, RoutedEventArgs e)
+    {
+        Directory.CreateDirectory(Settings.AppDataRoot); // so Explorer has something to open even on first run
+        Process.Start(new ProcessStartInfo(Settings.AppDataRoot) { UseShellExecute = true });
+    }
 
     private async void CheckUpdate_Click(object sender, RoutedEventArgs e)
     {

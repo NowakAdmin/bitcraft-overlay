@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Threading;
+using Microsoft.Web.WebView2.Wpf;
 
 namespace BitCraftOverlay;
 
@@ -29,6 +30,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        Browser.CreationProperties = new CoreWebView2CreationProperties { UserDataFolder = Settings.WebView2DataFolder };
         SourceInitialized += MainWindow_SourceInitialized;
         Loaded += MainWindow_Loaded;
         Closing += (_, _) => SaveWindowState();

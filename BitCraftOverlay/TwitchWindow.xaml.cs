@@ -1,4 +1,5 @@
 using System.Windows;
+using Microsoft.Web.WebView2.Wpf;
 
 namespace BitCraftOverlay;
 
@@ -7,5 +8,9 @@ namespace BitCraftOverlay;
 // window chrome (resize, minimize, maximize) is what they actually want.
 public partial class TwitchWindow : Window
 {
-    public TwitchWindow() => InitializeComponent();
+    public TwitchWindow()
+    {
+        InitializeComponent();
+        Browser.CreationProperties = new CoreWebView2CreationProperties { UserDataFolder = Settings.WebView2DataFolder };
+    }
 }

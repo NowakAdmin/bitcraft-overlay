@@ -22,9 +22,19 @@ public class Settings
     /// <summary>Last full URL visited per tab (e.g. bitcraftmap.com encodes its view in the URL) - restored on next open instead of the tab's plain default.</summary>
     public Dictionary<string, string> LastTabUrls { get; set; } = new();
 
-    private static readonly string FilePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "BitCraftOverlay", "settings.json");
+    /// <summary>Everything the app saves lives under here, so one folder (and one "show my data" button) covers it all.</summary>
+    public static readonly string AppDataRoot = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BitCraftOverlay");
+
+    private static readonly string FilePath = Path.Combine(AppDataRoot, "settings.json");
+
+    /// <summary>
+    /// Where WebView2 keeps its browser profile (cache, cookies, Twitch login...).
+    /// Without this, WebView2 defaults to a "<exe-name>.WebView2" folder sitting
+    /// right next to the .exe - annoying clutter, especially for a portable zip
+    /// extracted to the Desktop.
+    /// </summary>
+    public static readonly string WebView2DataFolder = Path.Combine(AppDataRoot, "WebView2");
 
     public static Settings Load()
     {
