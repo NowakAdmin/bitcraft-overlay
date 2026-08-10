@@ -22,6 +22,9 @@ public class Settings
     /// <summary>Last full URL visited per tab (e.g. bitcraftmap.com encodes its view in the URL) - restored on next open instead of the tab's plain default.</summary>
     public Dictionary<string, string> LastTabUrls { get; set; } = new();
 
+    /// <summary>Saved rate (start/stop) calculations, newest first.</summary>
+    public List<CalcEntry> SavedCalculations { get; set; } = new();
+
     /// <summary>Everything the app saves lives under here, so one folder (and one "show my data" button) covers it all.</summary>
     public static readonly string AppDataRoot = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BitCraftOverlay");
