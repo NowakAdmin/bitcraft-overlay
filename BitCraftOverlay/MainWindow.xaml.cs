@@ -79,7 +79,7 @@ public partial class MainWindow : Window
 
     // --- Startup positioning / restore --------------------------------------
 
-    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         Width = _settings.WindowWidth;
         Height = _settings.WindowHeight;
@@ -93,6 +93,14 @@ public partial class MainWindow : Window
         {
             PositionOverGameWindow();
         }
+
+        // On a brand-new install, WebView2's first-ever startup (spinning up the
+        // Edge runtime, creating the profile folder) can take a few seconds. Setting
+        // Source before that finishes just queues one pending navigation - if the
+        // user clicks a different tab in the meantime, that overwrites the queued
+        // value and the very first tab's click is silently lost. Waiting here first
+        // means every tab click after this point hits an already-ready WebView2.
+        await Browser.EnsureCoreWebView2Async();
 
         ShowTab(_settings.LastTab);
 
