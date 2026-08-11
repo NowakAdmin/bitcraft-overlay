@@ -27,6 +27,7 @@ public partial class SettingsWindow : Window
         ShowBrico.IsChecked = !hiddenTabs.Contains("Brico");
         ShowMapa.IsChecked = !hiddenTabs.Contains("Mapa");
         ShowCalc.IsChecked = !hiddenTabs.Contains("Calc");
+        ShowStats.IsChecked = !hiddenTabs.Contains("Stats");
         ShowTwitch.IsChecked = !hiddenTabs.Contains("Twitch");
 
         VersionLabel.Text = $"Version {CurrentVersion}";
@@ -101,6 +102,7 @@ public partial class SettingsWindow : Window
         if (ShowBrico.IsChecked != true) HiddenTabs.Add("Brico");
         if (ShowMapa.IsChecked != true) HiddenTabs.Add("Mapa");
         if (ShowCalc.IsChecked != true) HiddenTabs.Add("Calc");
+        if (ShowStats.IsChecked != true) HiddenTabs.Add("Stats");
         if (ShowTwitch.IsChecked != true) HiddenTabs.Add("Twitch");
 
         DialogResult = true;

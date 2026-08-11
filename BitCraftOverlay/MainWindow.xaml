@@ -117,6 +117,70 @@
             </Border>
         </Grid>
 
+        <!-- Player-stats snapshots from bitjita.com's API - also native, also swaps in
+             for the WebView2 instead of navigating anywhere. -->
+        <ScrollViewer x:Name="StatsPanel" Grid.Column="0" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="8">
+                <TextBlock Text="PLAYER" FontSize="10" FontWeight="Bold" Opacity="0.8"/>
+                <Grid Margin="0,2,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBox x:Name="StatsPlayerNameBox" Grid.Column="0"/>
+                    <Button Grid.Column="1" Content="Find" Margin="4,0,0,0" Click="StatsFindPlayer_Click"/>
+                </Grid>
+                <TextBlock x:Name="StatsPlayerFoundLabel" Style="{StaticResource CalcLabel}"/>
+
+                <TextBlock Text="SNAPSHOT COMPARE" FontSize="10" FontWeight="Bold" Opacity="0.8" Margin="0,12,0,0"/>
+                <Grid Margin="0,2,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0" Content="Take A" Click="StatsTakeA_Click"/>
+                    <Button Grid.Column="1" Content="Take B" Margin="4,0,0,0" Click="StatsTakeB_Click"/>
+                </Grid>
+                <TextBlock x:Name="StatsAbLabel" Text="A: not taken   B: not taken" Style="{StaticResource CalcLabel}"/>
+
+                <ItemsControl x:Name="StatsDiffList" Margin="0,6,0,0">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding}" FontSize="10" Foreground="White" TextWrapping="Wrap" Margin="0,1,0,0"/>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <Grid Margin="0,8,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBox x:Name="StatsCompareNameBox" Grid.Column="0"/>
+                    <Button Grid.Column="1" Content="Save" Margin="4,0,0,0" Click="StatsSaveComparison_Click"/>
+                </Grid>
+
+                <ItemsControl x:Name="StatsComparisonHistoryList" Margin="0,4,0,0">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Background="#242424" Margin="0,2,0,0" Padding="4">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{Binding Name}" FontSize="10" Foreground="White"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                    <Button Grid.Column="1" Content="Load" Padding="6,1" FontSize="9"
+                                            Click="StatsLoadComparison_Click" Tag="{Binding}"/>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </ScrollViewer>
+
         <!-- Reserved strip: kept in its own column so it never sits under the WebView2
              HWND, which would otherwise eat the mouse input (airspace issue). Only the
              grip glyph at the bottom is interactive; drag it to resize width + height. -->

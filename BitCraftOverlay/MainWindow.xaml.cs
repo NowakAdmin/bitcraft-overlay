@@ -29,6 +29,9 @@ public partial class MainWindow : Window
     private nint _hwnd;
     private HeaderWindow? _header;
     private readonly ObservableCollection<CalcEntry> _calcHistory;
+    private readonly ObservableCollection<StatComparison> _statComparisons;
+    private StatSnapshot? _statA;
+    private StatSnapshot? _statB;
 
     public MainWindow()
     {
@@ -36,6 +39,9 @@ public partial class MainWindow : Window
         Browser.CreationProperties = new CoreWebView2CreationProperties { UserDataFolder = Settings.WebView2DataFolder };
         _calcHistory = new ObservableCollection<CalcEntry>(_settings.SavedCalculations);
         CalcHistoryList.ItemsSource = _calcHistory;
+        _statComparisons = new ObservableCollection<StatComparison>(_settings.SavedComparisons);
+        StatsComparisonHistoryList.ItemsSource = _statComparisons;
+        StatsPlayerNameBox.Text = _settings.StatsPlayerName;
         SourceInitialized += MainWindow_SourceInitialized;
         Loaded += MainWindow_Loaded;
         Closing += (_, _) => SaveWindowState();
@@ -207,15 +213,11 @@ public partial class MainWindow : Window
         _currentTab = tab;
         _settings.LastTab = tab;
 
-        if (tab == "Calc")
-        {
-            Browser.Visibility = Visibility.Collapsed;
-            CalcPanel.Visibility = Visibility.Visible;
-            return;
-        }
+        CalcPanel.Visibility = tab == "Calc" ? Visibility.Visible : Visibility.Collapsed;
+        StatsPanel.Visibility = tab == "Stats" ? Visibility.Visible : Visibility.Collapsed;
+        Browser.Visibility = tab is "Calc" or "Stats" ? Visibility.Collapsed : Visibility.Visible;
+        if (tab is "Calc" or "Stats") return;
 
-        CalcPanel.Visibility = Visibility.Collapsed;
-        Browser.Visibility = Visibility.Visible;
         Browser.Source = new Uri(_settings.LastTabUrls.TryGetValue(tab, out var savedUrl) && !string.IsNullOrWhiteSpace(savedUrl)
             ? savedUrl
             : DefaultUrlFor(tab));
@@ -290,6 +292,159 @@ public partial class MainWindow : Window
         CalcNameBox.Text = entry.Name;
     }
 
+    // --- Stats: bitjita.com player snapshots ----------------------------------
+
+    // Disables the clicked button and swaps its text while an API call is in
+    // flight, so impatient clicking can't fire off a pile of duplicate requests.
+    private static async Task RunBusy(Button button, string busyText, Func<Task> action)
+    {
+        button.IsEnabled = false;
+        var original = button.Content;
+        button.Content = busyText;
+        try
+        {
+            await action();
+        }
+        finally
+        {
+            button.IsEnabled = true;
+            button.Content = original;
+        }
+    }
+
+    private async void StatsFindPlayer_Click(object sender, RoutedEventArgs e)
+    {
+        var name = StatsPlayerNameBox.Text.Trim();
+        if (name.Length < 2)
+        {
+            StatsPlayerFoundLabel.Text = "Type at least 2 characters.";
+            return;
+        }
+        StatsPlayerFoundLabel.Text = "Searching...";
+        await RunBusy((Button)sender, "...", async () =>
+        {
+            try
+            {
+                var found = await BitjitaApi.FindPlayerAsync(name);
+                if (found is null)
+                {
+                    StatsPlayerFoundLabel.Text = "No player found.";
+                    return;
+                }
+                _settings.StatsPlayerName = name;
+                _settings.StatsPlayerEntityId = found.Value.EntityId;
+                _settings.Save();
+                StatsPlayerFoundLabel.Text = $"Found: {found.Value.Username}";
+            }
+            catch
+            {
+                StatsPlayerFoundLabel.Text = "Search failed (no internet?).";
+            }
+        });
+    }
+
+    private async void StatsTakeA_Click(object sender, RoutedEventArgs e) => await StatsTakeSnapshot(isA: true, (Button)sender);
+    private async void StatsTakeB_Click(object sender, RoutedEventArgs e) => await StatsTakeSnapshot(isA: false, (Button)sender);
+
+    private async Task StatsTakeSnapshot(bool isA, Button button)
+    {
+        if (string.IsNullOrWhiteSpace(_settings.StatsPlayerEntityId))
+        {
+            MessageBox.Show("Find your player first.", "BitCraft Overlay", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        await RunBusy(button, "Loading...", async () =>
+        {
+            try
+            {
+                var snap = await BitjitaApi.TakeSnapshotAsync(_settings.StatsPlayerEntityId);
+                if (isA) _statA = snap; else _statB = snap;
+                UpdateStatsAbLabel();
+                UpdateStatsDiff();
+            }
+            catch
+            {
+                MessageBox.Show("Couldn't fetch stats (no internet, or the saved player is stale - try Find again).",
+                    "BitCraft Overlay", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        });
+    }
+
+    private void UpdateStatsAbLabel()
+    {
+        static string Fmt(StatSnapshot? s) =>
+            s is null ? "not taken" : DateTimeOffset.FromUnixTimeSeconds(s.TimestampUnix).LocalDateTime.ToString("HH:mm:ss");
+        StatsAbLabel.Text = $"A: {Fmt(_statA)}   B: {Fmt(_statB)}";
+    }
+
+    private void UpdateStatsDiff()
+    {
+        if (_statA is null || _statB is null) return;
+        StatsDiffList.ItemsSource = BuildDiffLines(_statA, _statB);
+    }
+
+    private static List<string> BuildDiffLines(StatSnapshot a, StatSnapshot b)
+    {
+        var lines = new List<string>();
+        var elapsedSeconds = b.TimestampUnix - a.TimestampUnix;
+
+        foreach (var key in a.SkillXp.Keys.Union(b.SkillXp.Keys))
+        {
+            var da = a.SkillXp.GetValueOrDefault(key);
+            var db = b.SkillXp.GetValueOrDefault(key);
+            var delta = db - da;
+            if (delta == 0) continue;
+            var perHour = elapsedSeconds > 0 ? delta / (double)elapsedSeconds * 3600.0 : 0;
+            var power = b.ToolPowerBySkill.TryGetValue(key, out var p) ? p : a.ToolPowerBySkill.GetValueOrDefault(key);
+            var powerSuffix = power > 0 ? $" p:{power}" : "";
+            lines.Add($"{key}: {delta:+#,0;-#,0} xp ({da:#,0} → {db:#,0}) — {perHour:0.#}/h{powerSuffix}");
+        }
+        foreach (var key in a.Items.Keys.Union(b.Items.Keys))
+        {
+            var da = a.Items.GetValueOrDefault(key);
+            var db = b.Items.GetValueOrDefault(key);
+            if (db != da) lines.Add($"{key}: {db - da:+#,0;-#,0}");
+        }
+        if (b.PlaceableCount != a.PlaceableCount)
+            lines.Add($"Placeables: {b.PlaceableCount - a.PlaceableCount:+#,0;-#,0} ({a.PlaceableCount} → {b.PlaceableCount})");
+
+        if (lines.Count == 0) lines.Add("No changes between A and B.");
+        return lines;
+    }
+
+    private void StatsSaveComparison_Click(object sender, RoutedEventArgs e)
+    {
+        if (_statA is null || _statB is null)
+        {
+            MessageBox.Show("Take both snapshot A and B first.", "BitCraft Overlay", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        var name = string.IsNullOrWhiteSpace(StatsCompareNameBox.Text) ? $"Compare {_statComparisons.Count + 1}" : StatsCompareNameBox.Text.Trim();
+
+        var existing = _statComparisons.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (existing != null)
+        {
+            var result = MessageBox.Show($"A saved comparison named \"{name}\" already exists. Overwrite it?",
+                "BitCraft Overlay", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (result != MessageBoxResult.Yes) return;
+            _statComparisons.Remove(existing);
+        }
+
+        _statComparisons.Insert(0, new StatComparison { Name = name, A = _statA, B = _statB });
+        _settings.SavedComparisons = _statComparisons.ToList();
+        _settings.Save();
+    }
+
+    private void StatsLoadComparison_Click(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).Tag is not StatComparison c) return;
+        _statA = c.A;
+        _statB = c.B;
+        StatsCompareNameBox.Text = c.Name;
+        UpdateStatsAbLabel();
+        UpdateStatsDiff();
+    }
+
     private string DefaultUrlFor(string tab) => tab switch
     {
         "Bitjita" => BitjitaUrl,
@@ -318,7 +473,7 @@ public partial class MainWindow : Window
 
             if (_settings.HiddenTabs.Contains(_currentTab))
             {
-                var firstVisible = new[] { "BitcraftSync", "Bitjita", "Brico", "Mapa", "Calc" }.FirstOrDefault(t => !_settings.HiddenTabs.Contains(t));
+                var firstVisible = new[] { "BitcraftSync", "Bitjita", "Brico", "Mapa", "Calc", "Stats" }.FirstOrDefault(t => !_settings.HiddenTabs.Contains(t));
                 if (firstVisible != null) ShowTab(firstVisible);
             }
             else if (_settings.LastTab == "BitcraftSync")

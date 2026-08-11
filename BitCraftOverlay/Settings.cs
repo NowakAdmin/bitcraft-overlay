@@ -25,6 +25,13 @@ public class Settings
     /// <summary>Saved rate (start/stop) calculations, newest first.</summary>
     public List<CalcEntry> SavedCalculations { get; set; } = new();
 
+    /// <summary>bitjita.com player identity for the Stats tab (resolved once via search, then reused).</summary>
+    public string StatsPlayerName { get; set; } = "";
+    public string StatsPlayerEntityId { get; set; } = "";
+
+    /// <summary>Saved snapshot-A/B comparisons, newest first. Tool power per skill is captured inside each snapshot itself.</summary>
+    public List<StatComparison> SavedComparisons { get; set; } = new();
+
     /// <summary>Everything the app saves lives under here, so one folder (and one "show my data" button) covers it all.</summary>
     public static readonly string AppDataRoot = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BitCraftOverlay");
