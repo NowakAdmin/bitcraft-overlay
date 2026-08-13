@@ -10,7 +10,8 @@ A floating, always-on-top overlay for [BitCraft Online](https://bitcraftonline.c
 - **[bitcraftmap.com](https://bitcraftmap.com)** — map (remembers your last view)
 - **Twitch** (`twitch.tv/bitcraftonline`) — separate window for watching the stream / drops
 - **Calc** — native start/stop rate calculator (e.g. XP/hour), with named save/load history
-- **Stats** — snapshot-compare a bitjita.com player's full state (skill XP, all inventories, placeables, equipped tool power) between two points in time, with named save/load
+- **Stats** — snapshot-compare a bitjita.com player's full state (skill XP + XP/h, all inventories, placeables, equipped tools) between two points in time, with named save/load
+- **Claim** — look up a claim/settlement by name: sortable member tables for skill levels (tier-colored), armor loadouts (rarity-colored, all saved presets), and per-skill tools (rarity-colored)
 
 ## Screenshots
 
@@ -51,7 +52,11 @@ The main goal is to make the game easier to play for people on a **single monito
 - Remembers position, size, and the last URL of each tab
 - Option to hide individual tabs, and to show icons instead of text labels, in settings
 - Calc tab: start/stop rate calculator with named history
-- Stats tab: bitjita.com player snapshot compare (skill XP + XP/h, all items, placeables, tool power per skill), named history
+- Stats tab: bitjita.com player snapshot compare (skill XP + XP/h, all items, placeables, equipped tools), named history
+- Claim tab: settlement lookup with 3 sortable sub-tabs
+  - Members: skill level per column, cell tinted by the game's own tier colors
+  - Armor: every member's saved armor presets (tier + rarity colored)
+  - Tools: each member's Toolbelt tool per skill, with instrument/charm shown as attached detail
 
 ## Build
 

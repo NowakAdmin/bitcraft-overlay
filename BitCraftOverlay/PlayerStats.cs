@@ -5,9 +5,8 @@ namespace BitCraftOverlay;
 
 /// <summary>
 /// A full player-state capture at one point in time: XP per skill, item quantities
-/// across every container the player owns, placeable count, and the power of
-/// whatever tool is currently equipped for each skill (so a skill's XP gain and
-/// the gear it was earned with are tied together in one snapshot).
+/// across every container the player owns, placeable count, and whatever tool is
+/// currently in hand (main_hand/off_hand).
 /// </summary>
 public class StatSnapshot
 {
@@ -15,7 +14,7 @@ public class StatSnapshot
     public Dictionary<string, long> SkillXp { get; set; } = new();
     public Dictionary<string, long> Items { get; set; } = new();
     public int PlaceableCount { get; set; }
-    public Dictionary<string, int> ToolPowerBySkill { get; set; } = new();
+    public List<string> EquippedTools { get; set; } = new(); // e.g. "Steel Pickaxe (T7)"
 }
 
 /// <summary>Two saved snapshots kept together under a name, so the diff between them can be reloaded later.</summary>
@@ -62,7 +61,6 @@ public static class BitjitaApi
     public static async Task<StatSnapshot> TakeSnapshotAsync(string entityId)
     {
         var snapshot = new StatSnapshot { TimestampUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds() };
-        var skillNames = new Dictionary<string, string>(); // skillId -> name, also used to resolve tool power by skill
 
         var playerJson = await Http.GetStringAsync($"https://bitjita.com/api/players/{entityId}");
         using (var doc = JsonDocument.Parse(playerJson))
@@ -70,6 +68,7 @@ public static class BitjitaApi
             var player = doc.RootElement.GetProperty("player");
             snapshot.PlaceableCount = player.TryGetProperty("placeableCount", out var pc) ? pc.GetInt32() : 0;
 
+            var skillNames = new Dictionary<string, string>();
             if (player.TryGetProperty("skillMap", out var skillMap))
                 foreach (var kv in skillMap.EnumerateObject())
                     skillNames[kv.Name] = kv.Value.TryGetProperty("name", out var n) ? n.GetString() ?? kv.Name : kv.Name;
@@ -84,28 +83,13 @@ public static class BitjitaApi
                 }
         }
 
-        // The item catalog (name + tool stats per item id) only comes back from the
-        // inventories endpoint - fetch it once and reuse it to resolve both the
-        // player's items and, by cross-referencing equipped item ids, tool power per skill.
-        var itemNames = new Dictionary<string, string>();
-        var toolPowerByItemId = new Dictionary<string, (int Power, string SkillId)>();
-
+        // /inventories only gives bare itemId+quantity refs (no name/tier catalog anywhere
+        // in the response, despite how this used to be parsed) - so item names fall back to
+        // "Item {id}" until there's a cheap way to resolve names for a whole inventory.
         var invJson = await Http.GetStringAsync($"https://bitjita.com/api/players/{entityId}/inventories");
         using (var doc = JsonDocument.Parse(invJson))
         {
-            var root = doc.RootElement;
-            foreach (var dictName in new[] { "items", "cargos" })
-            {
-                if (!root.TryGetProperty(dictName, out var d)) continue;
-                foreach (var kv in d.EnumerateObject())
-                {
-                    itemNames[kv.Name] = kv.Value.TryGetProperty("name", out var n) ? n.GetString() ?? kv.Name : kv.Name;
-                    if (kv.Value.TryGetProperty("toolPower", out var tp) && kv.Value.TryGetProperty("toolSkillId", out var tsid))
-                        toolPowerByItemId[kv.Name] = (tp.GetInt32(), tsid.GetInt32().ToString());
-                }
-            }
-
-            if (root.TryGetProperty("inventories", out var invs))
+            if (doc.RootElement.TryGetProperty("inventories", out var invs))
                 foreach (var inv in invs.EnumerateArray())
                 {
                     if (!inv.TryGetProperty("pockets", out var pockets)) continue;
@@ -115,24 +99,26 @@ public static class BitjitaApi
                         if (!contents.TryGetProperty("itemId", out var idProp)) continue;
                         var id = idProp.GetInt64().ToString();
                         var qty = contents.TryGetProperty("quantity", out var q) ? q.GetInt64() : 0;
-                        var name = itemNames.TryGetValue(id, out var n) ? n : $"Item {id}";
+                        var name = $"Item {id}";
                         snapshot.Items[name] = snapshot.Items.GetValueOrDefault(name) + qty;
                     }
                 }
         }
 
+        // Unlike /inventories, /equipment embeds the full item (name, tier, ...) inline -
+        // no catalog cross-reference needed for whatever's currently in hand.
         var equipJson = await Http.GetStringAsync($"https://bitjita.com/api/players/{entityId}/equipment");
         using (var doc = JsonDocument.Parse(equipJson))
         {
             if (doc.RootElement.TryGetProperty("equipment", out var equipment))
                 foreach (var slot in equipment.EnumerateArray())
                 {
+                    if (!slot.TryGetProperty("primary", out var primaryProp) || primaryProp.GetString() is not ("main_hand" or "off_hand")) continue;
                     if (!slot.TryGetProperty("item", out var item) || item.ValueKind != JsonValueKind.Object) continue;
-                    if (!item.TryGetProperty("id", out var idProp)) continue;
-                    var id = idProp.GetInt64().ToString();
-                    if (!toolPowerByItemId.TryGetValue(id, out var tool)) continue;
-                    var skillName = skillNames.TryGetValue(tool.SkillId, out var n) ? n : $"Skill {tool.SkillId}";
-                    snapshot.ToolPowerBySkill[skillName] = tool.Power;
+
+                    var itemName = item.TryGetProperty("name", out var n) ? n.GetString() ?? "?" : "?";
+                    var tier = item.TryGetProperty("tier", out var t) ? t.GetInt32() : 0;
+                    snapshot.EquippedTools.Add(tier > 0 ? $"{itemName} (T{tier})" : itemName);
                 }
         }
 

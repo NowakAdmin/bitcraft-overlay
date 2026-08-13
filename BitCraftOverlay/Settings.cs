@@ -32,6 +32,12 @@ public class Settings
     /// <summary>Saved snapshot-A/B comparisons, newest first. Tool power per skill is captured inside each snapshot itself.</summary>
     public List<StatComparison> SavedComparisons { get; set; } = new();
 
+    /// <summary>Last-searched claim name for the Claim tab (just a prefill convenience - always re-searched on Find).</summary>
+    public string ClaimName { get; set; } = "";
+
+    /// <summary>Full result of the last Claim tab Find - shown immediately on next launch, replaced only by another Find.</summary>
+    public ClaimInfo? SavedClaimData { get; set; }
+
     /// <summary>Everything the app saves lives under here, so one folder (and one "show my data" button) covers it all.</summary>
     public static readonly string AppDataRoot = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BitCraftOverlay");

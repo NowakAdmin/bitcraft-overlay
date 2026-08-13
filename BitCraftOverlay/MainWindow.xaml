@@ -50,6 +50,23 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="ClaimGridHeaderStyle" TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="#2D2D2D"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="9"/>
+            <Setter Property="Padding" Value="4,2"/>
+            <Setter Property="BorderBrush" Value="#1A1A1A"/>
+            <Setter Property="BorderThickness" Value="0,0,1,1"/>
+        </Style>
+        <Style x:Key="ClaimGridCellStyle" TargetType="DataGridCell">
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="4,1"/>
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="#3A3A3A"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </Window.Resources>
     <Grid>
         <Grid.ColumnDefinitions>
@@ -180,6 +197,71 @@
                 </ItemsControl>
             </StackPanel>
         </ScrollViewer>
+
+        <!-- Claim/settlement lookup from bitjita.com's API - also native, also swaps in
+             for the WebView2 instead of navigating anywhere. -->
+        <Grid x:Name="ClaimPanel" Grid.Column="0" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0" Margin="8,8,8,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="ClaimNameBox" Grid.Column="0"/>
+                <Button Grid.Column="1" Content="Find" Margin="4,0,0,0" Click="ClaimFind_Click"/>
+            </Grid>
+            <TextBlock x:Name="ClaimFoundLabel" Grid.Row="1" Style="{StaticResource CalcLabel}" Margin="8,2,8,0"/>
+
+            <Grid Grid.Row="2" Margin="8,10,8,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Button x:Name="ClaimSubTabMembers" Grid.Column="0" Content="Members" Click="ClaimSubTab_Click"/>
+                <Button x:Name="ClaimSubTabArmor" Grid.Column="1" Content="Armor" Margin="4,0,0,0" Click="ClaimSubTab_Click"/>
+                <Button x:Name="ClaimSubTabTools" Grid.Column="2" Content="Tools" Margin="4,0,0,0" Click="ClaimSubTab_Click"/>
+            </Grid>
+
+            <Grid Grid.Row="3">
+                <!-- Sub-tab 1: members table - Name + one column per skill (built in code-behind,
+                     since the skill set comes from the API), cell background = level's tier color.
+                     Headers are clickable text (see code-behind) rather than the DataGrid's built-in
+                     sort click, which didn't reliably fire for the dynamically-built skill columns. -->
+                <DataGrid x:Name="ClaimMembersGrid" AutoGenerateColumns="False" HeadersVisibility="Column"
+                          CanUserAddRows="False" CanUserResizeRows="False"
+                          IsReadOnly="True" GridLinesVisibility="None" RowHeight="22" FontSize="10"
+                          Background="#1E1E1E" Foreground="White" BorderThickness="0"
+                          RowBackground="#242424" AlternatingRowBackground="#2A2A2A" FrozenColumnCount="1"
+                          ColumnHeaderStyle="{StaticResource ClaimGridHeaderStyle}" CellStyle="{StaticResource ClaimGridCellStyle}"
+                          PreviewMouseLeftButtonUp="ClaimMembersGrid_HeaderClicked"/>
+
+                <!-- Sub-tab 2: every member's armor, one row per saved preset (up to 3) -->
+                <DataGrid x:Name="ClaimArmorGrid" Visibility="Collapsed" AutoGenerateColumns="False" HeadersVisibility="Column"
+                          CanUserAddRows="False" CanUserResizeRows="False"
+                          IsReadOnly="True" GridLinesVisibility="None" RowHeight="22" FontSize="10"
+                          Background="#1E1E1E" Foreground="White" BorderThickness="0"
+                          RowBackground="#242424" AlternatingRowBackground="#2A2A2A" FrozenColumnCount="2"
+                          ColumnHeaderStyle="{StaticResource ClaimGridHeaderStyle}" CellStyle="{StaticResource ClaimGridCellStyle}"
+                          PreviewMouseLeftButtonUp="ClaimArmorGrid_HeaderClicked"/>
+
+                <!-- Sub-tab 3: one row per member, each skill cell stacking up to 3 lines
+                     (Tool/Instrument/Charm) - no fixed RowHeight, so rows auto-size to fit. -->
+                <DataGrid x:Name="ClaimToolsGrid" Visibility="Collapsed" AutoGenerateColumns="False" HeadersVisibility="Column"
+                          CanUserAddRows="False" CanUserResizeRows="False"
+                          IsReadOnly="True" GridLinesVisibility="None" FontSize="10"
+                          Background="#1E1E1E" Foreground="White" BorderThickness="0"
+                          RowBackground="#242424" AlternatingRowBackground="#2A2A2A" FrozenColumnCount="2"
+                          ColumnHeaderStyle="{StaticResource ClaimGridHeaderStyle}" CellStyle="{StaticResource ClaimGridCellStyle}"
+                          PreviewMouseLeftButtonUp="ClaimToolsGrid_HeaderClicked"/>
+            </Grid>
+        </Grid>
 
         <!-- Reserved strip: kept in its own column so it never sits under the WebView2
              HWND, which would otherwise eat the mouse input (airspace issue). Only the
