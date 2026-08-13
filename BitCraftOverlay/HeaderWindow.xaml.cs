@@ -71,6 +71,7 @@ public partial class HeaderWindow : Window
         TabMapa.Visibility = hidden.Contains("Mapa") ? Visibility.Collapsed : Visibility.Visible;
         TabCalc.Visibility = hidden.Contains("Calc") ? Visibility.Collapsed : Visibility.Visible;
         TabStats.Visibility = hidden.Contains("Stats") ? Visibility.Collapsed : Visibility.Visible;
+        TabClaim.Visibility = hidden.Contains("Claim") ? Visibility.Collapsed : Visibility.Visible;
         TwitchButton.Visibility = hidden.Contains("Twitch") ? Visibility.Collapsed : Visibility.Visible;
     }
 
@@ -90,6 +91,9 @@ public partial class HeaderWindow : Window
 
         TabStats.Content = useIcons ? "📊" : "Stats";
         TabStats.Padding = useIcons ? new Thickness(7, 0, 7, 0) : new Thickness(8, 0, 8, 0);
+
+        TabClaim.Content = useIcons ? "🏘" : "Claim";
+        TabClaim.Padding = useIcons ? new Thickness(7, 0, 7, 0) : new Thickness(8, 0, 8, 0);
 
         if (useIcons)
         {

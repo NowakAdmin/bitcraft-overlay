@@ -59,6 +59,9 @@
             <Button x:Name="TabStats" Content="Stats" Padding="8,0" Height="28" Click="Tab_Click"
                     ToolTip="Player XP/inventory snapshots and tool power log (from bitjita.com)"
                     Background="Transparent" Foreground="White" BorderThickness="0"/>
+            <Button x:Name="TabClaim" Content="Claim" Padding="8,0" Height="28" Click="Tab_Click"
+                    ToolTip="Claim/settlement member list, skills, and armor loadouts (from bitjita.com)"
+                    Background="Transparent" Foreground="White" BorderThickness="0"/>
             <Button x:Name="TwitchButton" Content="Twitch" Padding="8,0" Height="28" Margin="4,0,0,0" Click="Twitch_Click"
                     ToolTip="Open twitch.tv/bitcraftonline in a separate window (watch the stream, collect drops)"
                     Background="Transparent" Foreground="White" BorderThickness="0"/>

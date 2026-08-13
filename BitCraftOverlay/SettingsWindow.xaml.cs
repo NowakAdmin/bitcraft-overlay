@@ -28,6 +28,7 @@ public partial class SettingsWindow : Window
         ShowMapa.IsChecked = !hiddenTabs.Contains("Mapa");
         ShowCalc.IsChecked = !hiddenTabs.Contains("Calc");
         ShowStats.IsChecked = !hiddenTabs.Contains("Stats");
+        ShowClaim.IsChecked = !hiddenTabs.Contains("Claim");
         ShowTwitch.IsChecked = !hiddenTabs.Contains("Twitch");
 
         VersionLabel.Text = $"Version {CurrentVersion}";
@@ -103,6 +104,7 @@ public partial class SettingsWindow : Window
         if (ShowMapa.IsChecked != true) HiddenTabs.Add("Mapa");
         if (ShowCalc.IsChecked != true) HiddenTabs.Add("Calc");
         if (ShowStats.IsChecked != true) HiddenTabs.Add("Stats");
+        if (ShowClaim.IsChecked != true) HiddenTabs.Add("Claim");
         if (ShowTwitch.IsChecked != true) HiddenTabs.Add("Twitch");
 
         DialogResult = true;
