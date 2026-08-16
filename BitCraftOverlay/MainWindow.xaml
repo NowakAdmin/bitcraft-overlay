@@ -235,7 +235,7 @@
                      Headers are clickable text (see code-behind) rather than the DataGrid's built-in
                      sort click, which didn't reliably fire for the dynamically-built skill columns. -->
                 <DataGrid x:Name="ClaimMembersGrid" AutoGenerateColumns="False" HeadersVisibility="Column"
-                          CanUserAddRows="False" CanUserResizeRows="False"
+                          CanUserAddRows="False" CanUserResizeRows="False" CanUserSortColumns="False"
                           IsReadOnly="True" GridLinesVisibility="None" RowHeight="22" FontSize="10"
                           Background="#1E1E1E" Foreground="White" BorderThickness="0"
                           RowBackground="#242424" AlternatingRowBackground="#2A2A2A" FrozenColumnCount="1"
@@ -244,7 +244,7 @@
 
                 <!-- Sub-tab 2: every member's armor, one row per saved preset (up to 3) -->
                 <DataGrid x:Name="ClaimArmorGrid" Visibility="Collapsed" AutoGenerateColumns="False" HeadersVisibility="Column"
-                          CanUserAddRows="False" CanUserResizeRows="False"
+                          CanUserAddRows="False" CanUserResizeRows="False" CanUserSortColumns="False"
                           IsReadOnly="True" GridLinesVisibility="None" RowHeight="22" FontSize="10"
                           Background="#1E1E1E" Foreground="White" BorderThickness="0"
                           RowBackground="#242424" AlternatingRowBackground="#2A2A2A" FrozenColumnCount="2"
@@ -254,7 +254,7 @@
                 <!-- Sub-tab 3: one row per member, each skill cell stacking up to 3 lines
                      (Tool/Instrument/Charm) - no fixed RowHeight, so rows auto-size to fit. -->
                 <DataGrid x:Name="ClaimToolsGrid" Visibility="Collapsed" AutoGenerateColumns="False" HeadersVisibility="Column"
-                          CanUserAddRows="False" CanUserResizeRows="False"
+                          CanUserAddRows="False" CanUserResizeRows="False" CanUserSortColumns="False"
                           IsReadOnly="True" GridLinesVisibility="None" FontSize="10"
                           Background="#1E1E1E" Foreground="White" BorderThickness="0"
                           RowBackground="#242424" AlternatingRowBackground="#2A2A2A" FrozenColumnCount="2"
