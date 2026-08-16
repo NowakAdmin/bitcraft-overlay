@@ -180,6 +180,16 @@ public partial class MainWindow : Window
         }
     }
 
+    // Clicking a tab while minimized should show that tab, not silently switch it in the
+    // background - un-minimize first so the click's effect is actually visible.
+    internal void EnsureExpanded()
+    {
+        if (!_minimized) return;
+        _minimized = false;
+        Show();
+        Height = _expandedHeight;
+    }
+
     // In case the resize grip got dragged somewhere silly (off-screen, tiny sliver).
     internal void ResetSize()
     {

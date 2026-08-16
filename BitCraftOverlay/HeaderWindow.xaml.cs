@@ -61,7 +61,11 @@ public partial class HeaderWindow : Window
         ((UIElement)sender).ReleaseMouseCapture();
     }
 
-    private void Tab_Click(object sender, RoutedEventArgs e) => _content.ShowTab(((FrameworkElement)sender).Name.Replace("Tab", ""));
+    private void Tab_Click(object sender, RoutedEventArgs e)
+    {
+        _content.EnsureExpanded();
+        _content.ShowTab(((FrameworkElement)sender).Name.Replace("Tab", ""));
+    }
 
     internal void ApplyHiddenTabs(List<string> hidden)
     {

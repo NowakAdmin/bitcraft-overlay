@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net.Http;
 using System.Text.Json;
 
@@ -83,9 +84,9 @@ public static class BitjitaApi
                 }
         }
 
-        // /inventories only gives bare itemId+quantity refs (no name/tier catalog anywhere
-        // in the response, despite how this used to be parsed) - so item names fall back to
-        // "Item {id}" until there's a cheap way to resolve names for a whole inventory.
+        // /inventories only gives bare itemId+quantity refs, no name - resolved below against
+        // the item/cargo catalog (same technique as the Claim tab's Toolbelt resolution).
+        var rawCounts = new Dictionary<string, long>(); // itemId -> total quantity
         var invJson = await Http.GetStringAsync($"https://bitjita.com/api/players/{entityId}/inventories");
         using (var doc = JsonDocument.Parse(invJson))
         {
@@ -99,10 +100,47 @@ public static class BitjitaApi
                         if (!contents.TryGetProperty("itemId", out var idProp)) continue;
                         var id = idProp.GetInt64().ToString();
                         var qty = contents.TryGetProperty("quantity", out var q) ? q.GetInt64() : 0;
-                        var name = $"Item {id}";
-                        snapshot.Items[name] = snapshot.Items.GetValueOrDefault(name) + qty;
+                        rawCounts[id] = rawCounts.GetValueOrDefault(id) + qty;
                     }
                 }
+        }
+
+        // One catalog lookup per unique item (cached), tried as a plain item first and a
+        // cargo second since the two live under separate endpoints.
+        var itemNameCache = new ConcurrentDictionary<string, Task<string>>();
+        Task<string> ResolveItemName(string itemId) => itemNameCache.GetOrAdd(itemId, async id =>
+        {
+            foreach (var url in new[] { $"https://bitjita.com/api/items/{id}", $"https://bitjita.com/api/cargo/{id}" })
+            {
+                try
+                {
+                    var json = await Http.GetStringAsync(url);
+                    using var doc = JsonDocument.Parse(json);
+                    var root = doc.RootElement;
+                    var name = root.TryGetProperty("item", out var itemEl) && itemEl.TryGetProperty("name", out var n1) ? n1.GetString()
+                        : root.TryGetProperty("cargo", out var cargoEl) && cargoEl.TryGetProperty("name", out var n2) ? n2.GetString()
+                        : root.TryGetProperty("name", out var n3) ? n3.GetString()
+                        : null;
+                    if (name != null) return name;
+                }
+                catch
+                {
+                    // not found at this endpoint - try the next one, or fall back to the id below
+                }
+            }
+            return $"Item {id}";
+        });
+
+        using (var concurrencyLimit = new SemaphoreSlim(30))
+        {
+            var resolveTasks = rawCounts.Keys.Select(async id =>
+            {
+                await concurrencyLimit.WaitAsync();
+                try { return (Id: id, Name: await ResolveItemName(id)); }
+                finally { concurrencyLimit.Release(); }
+            });
+            foreach (var (id, name) in await Task.WhenAll(resolveTasks))
+                snapshot.Items[name] = snapshot.Items.GetValueOrDefault(name) + rawCounts[id];
         }
 
         // Unlike /inventories, /equipment embeds the full item (name, tier, ...) inline -
