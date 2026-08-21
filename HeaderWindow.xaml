@@ -41,9 +41,9 @@
     <!-- Always fully opaque, regardless of the content window's transparency setting,
          so the user can never slider their way into losing access to these controls. -->
     <Grid Background="Transparent"
-          MouseLeftButtonDown="Header_MouseLeftButtonDown"
-          MouseLeftButtonUp="Header_MouseLeftButtonUp"
-          MouseMove="Header_MouseMove">
+          PreviewMouseLeftButtonDown="Header_PreviewMouseLeftButtonDown"
+          PreviewMouseLeftButtonUp="Header_PreviewMouseLeftButtonUp"
+          PreviewMouseMove="Header_PreviewMouseMove">
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
             <Button x:Name="TabBitcraftSync" Content="BitcraftSync" Padding="8,0" Height="28" Click="Tab_Click"
                     Background="Transparent" Foreground="White" BorderThickness="0"/>
@@ -65,11 +65,17 @@
             <Button x:Name="TabRoute" Content="Route" Padding="8,0" Height="28" Click="Tab_Click"
                     ToolTip="Gathering route planner - optimal order to visit nearby resource nodes"
                     Background="Transparent" Foreground="White" BorderThickness="0"/>
+            <Button x:Name="TabCustom" Content="Custom" Padding="8,0" Height="28" Click="Tab_Click"
+                    ToolTip="Your own custom URL (set in Settings)"
+                    Background="Transparent" Foreground="White" BorderThickness="0" Visibility="Collapsed"/>
             <Button x:Name="TwitchButton" Content="Twitch" Padding="8,0" Height="28" Margin="4,0,0,0" Click="Twitch_Click"
                     ToolTip="Open twitch.tv/bitcraftonline in a separate window (watch the stream, collect drops)"
                     Background="Transparent" Foreground="White" BorderThickness="0"/>
         </StackPanel>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="↻" Width="28" Height="28" Click="ReloadTab_Click" FontSize="14"
+                    ToolTip="Reload the current tab's page from its configured URL (undo any in-page link you clicked)"
+                    Background="Transparent" Foreground="White" BorderThickness="0"/>
             <Button Content="▭" Width="28" Height="28" Click="ResetSize_Click" ToolTip="Reset to default size"
                     Background="Transparent" Foreground="White" BorderThickness="0" FontSize="11"/>
             <Button Content="–" Width="28" Height="28" Click="Minimize_Click" ToolTip="Collapse"

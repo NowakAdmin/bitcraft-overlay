@@ -88,6 +88,16 @@ public static class TerrainMap
     private static BitmapSource? _mapBitmap;
     public static BitmapSource? MapBitmap => _mapBitmap;
 
+    /// <summary>Drops the in-memory copy (the bitmap alone is ~48MB, GridSize^2*3 bytes) - for
+    /// when the Route tab gets turned off in Settings entirely, so a feature the user can no
+    /// longer reach doesn't keep holding onto it. EnsureLoadedAsync reloads from the on-disk
+    /// cache (fast) the next time the tab is used again, no re-download needed.</summary>
+    public static void Unload()
+    {
+        _walkableBits = null;
+        _mapBitmap = null;
+    }
+
     public static async Task EnsureLoadedAsync()
     {
         if (_walkableBits != null && _mapBitmap != null) return;

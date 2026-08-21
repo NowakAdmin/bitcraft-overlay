@@ -13,11 +13,19 @@ public class Settings
     public string LastTab { get; set; } = "BitcraftSync";
     public string BitcraftSyncShareCode { get; set; } = "";
 
+    /// <summary>A player-configured URL for a "Custom" browser tab - e.g. a claim's own Google
+    /// Sheet or website. Visibility is controlled the same way as every other tab, via
+    /// HiddenTabs ("Custom") - MainWindow only actually shows the tab button when this is also
+    /// non-empty, so an enabled-but-unconfigured tab never appears blank.</summary>
+    public string CustomTabUrl { get; set; } = "";
+
     /// <summary>Tab names hidden from the header bar. Empty = all visible (default).</summary>
     public List<string> HiddenTabs { get; set; } = new();
 
-    /// <summary>Show each service's favicon instead of its text label on the tab bar.</summary>
-    public bool UseIconTabs { get; set; } = false;
+    /// <summary>Show each service's favicon instead of its text label on the tab bar. Default
+    /// on - icons take much less horizontal space, and a small overlay window with a full row
+    /// of text-label tabs can fill the whole header bar, leaving nowhere empty left to drag.</summary>
+    public bool UseIconTabs { get; set; } = true;
 
     /// <summary>Last full URL visited per tab (e.g. bitcraftmap.com encodes its view in the URL) - restored on next open instead of the tab's plain default.</summary>
     public Dictionary<string, string> LastTabUrls { get; set; } = new();
@@ -63,19 +71,42 @@ public class Settings
     /// spread out.</summary>
     public double RouteZoom { get; set; } = 1.0;
 
-    /// <summary>Everything the app saves lives under here, so one folder (and one "show my data" button) covers it all.</summary>
-    public static readonly string AppDataRoot = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BitCraftOverlay");
+    /// <summary>Everything the app saves lives under here, so one folder (and one "show my data"
+    /// button) covers it all. Next to the .exe (in a "Data" subfolder), not %LocalAppData% - the
+    /// app is meant to be portable (unzip anywhere, including a USB stick or a synced folder,
+    /// and take its settings/cache with it). The tradeoff: a release zip must never include an
+    /// already-populated Data folder from local dev/testing - see the publish notes wherever
+    /// this app gets packaged.</summary>
+    public static readonly string AppDataRoot = Path.Combine(AppContext.BaseDirectory, "Data");
 
     private static readonly string FilePath = Path.Combine(AppDataRoot, "settings.json");
 
-    /// <summary>
-    /// Where WebView2 keeps its browser profile (cache, cookies, Twitch login...).
-    /// Without this, WebView2 defaults to a "<exe-name>.WebView2" folder sitting
-    /// right next to the .exe - annoying clutter, especially for a portable zip
-    /// extracted to the Desktop.
-    /// </summary>
+    /// <summary>Where WebView2 keeps its browser profile (cache, cookies, Twitch login...).
+    /// Without this, WebView2 defaults to a "<exe-name>.WebView2" folder sitting right next to
+    /// the .exe - this just gives that clutter one clearly-named home alongside everything else
+    /// this app saves, instead of a second loose folder next to the binaries.</summary>
     public static readonly string WebView2DataFolder = Path.Combine(AppDataRoot, "WebView2");
+
+    /// <summary>Shared WebView2 startup config for every control in the app (MainWindow's tabs
+    /// AND TwitchWindow - both must use identical properties, since they share one browser
+    /// environment via the same UserDataFolder, and the FIRST control to initialize is the one
+    /// whose settings actually take effect for the whole shared environment).
+    /// - renderer-process-limit caps how many Chromium renderer processes exist at once,
+    ///   forcing reuse instead of a fresh one per site visited.
+    /// - disable-gpu: the GPU process runs for the whole browser environment regardless of
+    ///   which tab is active (confirmed - it doesn't tear down/restart per navigation), and only
+    ///   bitcraftmap.com's interactive WebGL map actually benefits from it; every other tab
+    ///   (BitcraftSync, Bitjita, Brico, Twitch, a Custom URL) is plain content. Trade-off: the
+    ///   map may render/pan more slowly without hardware acceleration - if that's noticeably
+    ///   worse, this is the first thing to revert.
+    /// NOT disabling the storage service (IndexedDB/localStorage/cookies) despite it also
+    /// showing up as its own process - that's what keeps Twitch (and any other tab) logged in
+    /// between launches, the whole reason this app uses a persistent UserDataFolder at all.</summary>
+    public static Microsoft.Web.WebView2.Wpf.CoreWebView2CreationProperties CreateWebViewCreationProperties() => new()
+    {
+        UserDataFolder = WebView2DataFolder,
+        AdditionalBrowserArguments = "--renderer-process-limit=4 --disable-gpu",
+    };
 
     public static Settings Load()
     {

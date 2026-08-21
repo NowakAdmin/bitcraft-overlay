@@ -1,7 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
-using System.IO;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -65,7 +64,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        Browser.CreationProperties = new CoreWebView2CreationProperties { UserDataFolder = Settings.WebView2DataFolder };
+        Browser.CreationProperties = Settings.CreateWebViewCreationProperties();
         // Route map render targets the panel's actual size (see RecomputeRoute) - a resize needs
         // a fresh render at the new size, not just a stretched-to-fit old one.
         RoutePanel.SizeChanged += (_, _) => _routeDirty = true;
@@ -162,6 +161,7 @@ public partial class MainWindow : Window
         _header.Top = Top - _header.Height;
         _header.ApplyHiddenTabs(_settings.HiddenTabs);
         _header.ApplyDisplayMode(_settings.UseIconTabs);
+        _header.SetCustomTabVisible(CustomTabShouldBeVisible);
         _header.Show();
 
         _header.LocationChanged += (_, _) =>
@@ -934,15 +934,34 @@ public partial class MainWindow : Window
         ClaimToolsGrid.Visibility = sender == ClaimSubTabTools ? Visibility.Visible : Visibility.Collapsed;
     }
 
+    /// <summary>"Custom" needs both the HiddenTabs toggle AND a configured URL - an
+    /// enabled-but-unconfigured tab would just show a blank browser.</summary>
+    private bool CustomTabShouldBeVisible =>
+        !string.IsNullOrWhiteSpace(_settings.CustomTabUrl) && !_settings.HiddenTabs.Contains("Custom");
+
     private string DefaultUrlFor(string tab) => tab switch
     {
         "Bitjita" => BitjitaUrl,
         "Brico" => BricoUrl,
         "Mapa" => MapUrl,
+        "Custom" => _settings.CustomTabUrl,
         _ => string.IsNullOrWhiteSpace(_settings.BitcraftSyncShareCode)
             ? BitcraftSyncBase
             : $"{BitcraftSyncBase}/s/{_settings.BitcraftSyncShareCode}",
     };
+
+    /// <summary>Re-navigates the currently visible browser tab back to its configured default
+    /// URL, discarding wherever an in-page link may have led - handy for the "Custom" tab
+    /// especially (a claim's own page might link off-site), but works the same for any browser
+    /// tab. No-op on a native tab (Calc/Stats/Claim/Route) - there's no URL to reset there.</summary>
+    internal void ReloadCurrentTabToDefault()
+    {
+        if (Browser.Visibility != Visibility.Visible) return;
+        var url = DefaultUrlFor(_currentTab);
+        if (string.IsNullOrWhiteSpace(url)) return;
+        _settings.LastTabUrls[_currentTab] = url;
+        Browser.Source = new Uri(url);
+    }
 
     // --- Route: gathering route planner --------------------------------------
 
@@ -961,34 +980,18 @@ public partial class MainWindow : Window
     private const double RouteRedrawMinMove = 15; // world units - below this, a position update doesn't trigger a full map redraw
     private const double RouteZoomMin = 0.4, RouteZoomMax = 3.0, RouteZoomStep = 0.25;
 
-    // ponytail: temporary trace log for diagnosing the live-tracking pipeline - delete once it's
-    // confirmed solid, this isn't meant to ship long-term.
-    private static readonly object RouteLogLock = new();
-    private static void RouteLog(string msg)
-    {
-        try
-        {
-            lock (RouteLogLock)
-                File.AppendAllText(Path.Combine(Settings.AppDataRoot, "route_debug.log"), $"{DateTime.Now:HH:mm:ss.fff} {msg}\n");
-        }
-        catch { /* diagnostic only */ }
-    }
-
     private async Task EnsureRouteResourceListLoaded()
     {
-        RouteLog($"EnsureRouteResourceListLoaded called, alreadyLoaded={_routeResourceListLoaded}");
         if (_routeResourceListLoaded) return;
         try
         {
             var types = await RouteApi.GetResourceTypesAsync();
-            RouteLog($"GetResourceTypesAsync -> {types.Count} types");
             RouteResourceCombo.ItemsSource = types;
             RouteResourceCombo.SelectedItem = types.FirstOrDefault(t => t.Id == _settings.RouteLastResourceId) ?? types.FirstOrDefault();
             _routeResourceListLoaded = true;
         }
-        catch (Exception ex)
+        catch
         {
-            RouteLog($"GetResourceTypesAsync FAILED: {ex}");
             RouteStatusLabel.Text = "Couldn't load the resource list (no internet?).";
         }
     }
@@ -1059,11 +1062,9 @@ public partial class MainWindow : Window
         RouteMapImage.Source = null;
         RouteMapPlaceholder.Visibility = Visibility.Visible;
 
-        RouteLog($"SelectRoutePlayerAsync: {username} ({entityId})");
         try
         {
             var pos = await SpacetimeClient.FindPlayerPositionAsync(entityId, _settings.RoutePlayerRegion);
-            RouteLog($"FindPlayerPositionAsync -> {(pos is null ? "null" : $"region={pos.Value.Region} x={pos.Value.WorldX} z={pos.Value.WorldZ}")}");
             if (pos is null)
             {
                 RoutePlayerFoundLabel.Text = $"{username} - not online live right now.";
@@ -1080,29 +1081,20 @@ public partial class MainWindow : Window
 
             void WireCommonEvents(SpacetimeLiveConnection conn)
             {
-                conn.RowsChanged += (table, ins, del) =>
-                {
-                    RouteLog($"RowsChanged: {table} +{ins.Count} -{del.Count}");
-                    OnRouteRowsChanged(table, ins, del);
-                };
+                conn.RowsChanged += OnRouteRowsChanged;
                 conn.Disconnected += ex => Dispatcher.Invoke(() =>
-                {
-                    RouteLog($"Disconnected: {ex}");
-                    RoutePlayerFoundLabel.Text = $"{username} - live connection lost ({ex.Message}).";
-                });
-                conn.QueryFailed += msg => RouteLog($"QueryFailed: {msg}");
+                    RoutePlayerFoundLabel.Text = $"{username} - live connection lost ({ex.Message}).");
+                conn.QueryFailed += msg => Dispatcher.Invoke(() => RouteStatusLabel.Text = $"Query failed: {msg}");
             }
 
             _routePlayerLive = new SpacetimeLiveConnection();
             WireCommonEvents(_routePlayerLive);
             await _routePlayerLive.ConnectAsync(pos.Value.Region);
             await _routePlayerLive.SubscribeAsync(new[] { $"SELECT * FROM mobile_entity_state WHERE entity_id = {entityId}" });
-            RouteLog("player connection subscribed");
 
             _routeLive = new SpacetimeLiveConnection();
             WireCommonEvents(_routeLive);
             await _routeLive.ConnectAsync(pos.Value.Region);
-            RouteLog("resource connection connected");
 
             _routeRecomputeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
             _routeRecomputeTimer.Tick += (_, _) =>
@@ -1114,18 +1106,16 @@ public partial class MainWindow : Window
                     _routeLastResubscribe = DateTime.UtcNow;
                     _ = ResubscribeRouteQueriesAsync();
                 }
-                if (_routeDirty) { _routeDirty = false; RouteLog("timer tick -> RecomputeRoute"); RecomputeRoute(); }
+                if (_routeDirty) { _routeDirty = false; RecomputeRoute(); }
             };
             _routeRecomputeTimer.Start();
 
             await ResubscribeRouteQueriesAsync();
-            RouteLog("ResubscribeRouteQueriesAsync ok");
             RoutePlayerFoundLabel.Text = $"{username} - live (region {pos.Value.Region}).";
             _routeDirty = true;
         }
         catch (Exception ex)
         {
-            RouteLog($"SelectRoutePlayerAsync FAILED: {ex}");
             RoutePlayerFoundLabel.Text = $"{username} - live tracking failed: {ex.Message}";
         }
     }
@@ -1198,7 +1188,6 @@ public partial class MainWindow : Window
             queries.Add("SELECT * FROM enemy_mob_monitor_state");
         }
         if (queries.Count == 0) return; // no resource picked yet - nothing to subscribe to
-        RouteLog("Subscribe: " + string.Join(" | ", queries));
         await _routeLive.SubscribeAsync(queries.ToArray());
     }
 
@@ -1285,7 +1274,6 @@ public partial class MainWindow : Window
     /// thread (called from the DispatcherTimer tick), so it can touch UI elements directly.</summary>
     private void RecomputeRoute()
     {
-        RouteLog($"RecomputeRoute: playerPos={_routePlayerPos} resourceEntities={_routeResourceEntityIds.Count} locationRows={_routeLocationRows.Count}");
         if (_routePlayerPos is not { } player)
         {
             RouteMapImage.Source = null;
@@ -1294,8 +1282,6 @@ public partial class MainWindow : Window
         }
 
         var resource = RouteResourceCombo.SelectedItem as ResourceType;
-        var matchedIds = resource is null ? 0 : _routeResourceEntityIds.Count(_routeLocationRows.ContainsKey);
-        RouteLog($"RecomputeRoute: resource={resource?.Name} matchedIds={matchedIds}");
         // Cap to the nearest RouteMaxNodes within a bounded radius before clustering/pathfinding.
         // Resource nodes are already geographically boxed server-side (see
         // ResubscribeRouteQueriesAsync), but creatures (enemy_mob_monitor_state) are NOT - the
@@ -1370,7 +1356,6 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            RouteLog($"RecomputeRoute FAILED: {ex}");
             RouteStatusLabel.Text = $"Couldn't render the route: {ex.Message}";
         }
     }
@@ -1408,28 +1393,56 @@ public partial class MainWindow : Window
 
     // --- Settings -----------------------------------------------------------
 
-    internal void OpenSettings(Window owner)
+    internal async void OpenSettings(Window owner)
     {
-        var dialog = new SettingsWindow(_settings.BitcraftSyncShareCode, _settings.HiddenTabs, _settings.UseIconTabs) { Owner = owner };
+        var dialog = new SettingsWindow(_settings.BitcraftSyncShareCode, _settings.CustomTabUrl, _settings.HiddenTabs, _settings.UseIconTabs) { Owner = owner };
         if (dialog.ShowDialog() == true)
         {
+            // Route's live tracking (two persistent WebSocket connections + a recompute timer)
+            // keeps running in the background regardless of which tab is currently showing, by
+            // design - that's what makes it "live" across tab switches. But if the tab gets
+            // turned off in Settings entirely, there's no reason for any of that to keep running
+            // - tear it down rather than leave it working for a tab the user can no longer reach.
+            var routeJustHidden = !_settings.HiddenTabs.Contains("Route") && dialog.HiddenTabs.Contains("Route");
+
             _settings.BitcraftSyncShareCode = dialog.ShareCode;
+            var customUrlChanged = _settings.CustomTabUrl != dialog.CustomUrl;
+            _settings.CustomTabUrl = dialog.CustomUrl;
             _settings.HiddenTabs = dialog.HiddenTabs;
             _settings.UseIconTabs = dialog.UseIconTabs;
+            if (routeJustHidden)
+            {
+                await DisconnectRouteLiveAsync();
+                TerrainMap.Unload();
+                RouteMapImage.Source = null;
+                // Dropping references makes the terrain bitmap/live-tracking dictionaries
+                // eligible for collection, but .NET doesn't necessarily reclaim that memory (or
+                // hand it back to the OS) right away on its own schedule - forcing a collection
+                // here is a deliberate one-off (the user just explicitly turned off a heavy
+                // feature), not something to do on a hot path.
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+            }
             _settings.LastTabUrls.Remove("BitcraftSync");
+            if (customUrlChanged) _settings.LastTabUrls.Remove("Custom"); // a freshly-saved URL should take effect immediately, not whatever was last loaded there
             _dirty = true;
             _settings.Save();
             _header?.ApplyHiddenTabs(_settings.HiddenTabs);
             _header?.ApplyDisplayMode(_settings.UseIconTabs);
 
-            if (_settings.HiddenTabs.Contains(_currentTab))
+            _header?.SetCustomTabVisible(CustomTabShouldBeVisible);
+
+            var visibleTabs = new[] { "BitcraftSync", "Bitjita", "Brico", "Mapa", "Calc", "Stats", "Claim", "Route" }
+                .Concat(CustomTabShouldBeVisible ? new[] { "Custom" } : Array.Empty<string>());
+            if (_settings.HiddenTabs.Contains(_currentTab) || (_currentTab == "Custom" && !CustomTabShouldBeVisible))
             {
-                var firstVisible = new[] { "BitcraftSync", "Bitjita", "Brico", "Mapa", "Calc", "Stats", "Claim", "Route" }.FirstOrDefault(t => !_settings.HiddenTabs.Contains(t));
+                var firstVisible = visibleTabs.FirstOrDefault(t => !_settings.HiddenTabs.Contains(t));
                 if (firstVisible != null) ShowTab(firstVisible);
             }
-            else if (_settings.LastTab == "BitcraftSync")
+            else if (_settings.LastTab == "BitcraftSync" || (_currentTab == "Custom" && customUrlChanged))
             {
-                ShowTab("BitcraftSync");
+                ShowTab(_currentTab); // re-navigate to pick up the freshly-saved share code / custom URL
             }
         }
     }

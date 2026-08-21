@@ -34,6 +34,13 @@ public sealed class SpacetimeLiveConnection : IAsyncDisposable
     private CancellationTokenSource? _cts;
     private Task? _receiveLoop;
     private int _requestId;
+    // One reused buffer per connection instead of a fresh 64KB array on every single message -
+    // during active gameplay this receive loop can see hundreds of small TransactionUpdates a
+    // second (confirmed in testing), and a fresh allocation each time added up to real GC
+    // churn/memory growth for no reason - the loop is inherently sequential (one message fully
+    // consumed before the next ReceiveAsync starts), so nothing else touches this buffer
+    // concurrently.
+    private readonly byte[] _receiveBuffer = new byte[64 * 1024];
 
     public async Task ConnectAsync(int region, CancellationToken ct = default)
     {
@@ -152,17 +159,16 @@ public sealed class SpacetimeLiveConnection : IAsyncDisposable
             ? value.GetProperty(field)
             : value[Array.IndexOf(columns, field)];
 
-    private static async Task<JsonElement> ReceiveJsonAsync(ClientWebSocket ws, CancellationToken ct)
+    private async Task<JsonElement> ReceiveJsonAsync(ClientWebSocket ws, CancellationToken ct)
     {
-        var buffer = new byte[64 * 1024];
         using var ms = new MemoryStream();
         WebSocketReceiveResult result;
         do
         {
-            result = await ws.ReceiveAsync(buffer, ct);
+            result = await ws.ReceiveAsync(_receiveBuffer, ct);
             if (result.MessageType == WebSocketMessageType.Close)
                 throw new InvalidOperationException($"Server closed: {ws.CloseStatus} {ws.CloseStatusDescription}");
-            ms.Write(buffer, 0, result.Count);
+            ms.Write(_receiveBuffer, 0, result.Count);
         } while (!result.EndOfMessage);
         return JsonDocument.Parse(ms.ToArray()).RootElement;
     }

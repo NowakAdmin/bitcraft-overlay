@@ -11,6 +11,6 @@ public partial class TwitchWindow : Window
     public TwitchWindow()
     {
         InitializeComponent();
-        Browser.CreationProperties = new CoreWebView2CreationProperties { UserDataFolder = Settings.WebView2DataFolder };
+        Browser.CreationProperties = Settings.CreateWebViewCreationProperties();
     }
 }
