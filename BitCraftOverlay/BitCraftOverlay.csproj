@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -6,7 +6,17 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
-    <Version>0.3.2</Version>
+    <Version>0.4.0</Version>
+    <!-- Self-contained single-file publish still leaves native (non-.NET) libraries like
+         WebView2Loader.dll as loose files alongside the exe unless this is set - it makes them
+         self-extract to a per-version temp cache at first run instead, so the self-contained
+         release asset really is "just the one .exe" as the README promises. Only affects
+         single-file publishes; no effect on normal dotnet build/run. -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <Company>Nowak Administrators Sp. z o.o.</Company>
+    <Authors>Nowak Administrators Sp. z o.o.</Authors>
+    <Product>BitCraft Overlay</Product>
+    <Copyright>Copyright © Nowak Administrators Sp. z o.o.</Copyright>
   </PropertyGroup>
 
   <ItemGroup>

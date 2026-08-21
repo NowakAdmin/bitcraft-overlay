@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.IO;
 using System.Net.Http;
 using System.Reflection;
 using System.Text.Json;
@@ -13,13 +12,15 @@ public partial class SettingsWindow : Window
     private const string RepoName = "bitcraft-overlay";
 
     public string ShareCode { get; private set; } = "";
+    public string CustomUrl { get; private set; } = "";
     public List<string> HiddenTabs { get; private set; } = new();
     public bool UseIconTabs { get; private set; }
 
-    public SettingsWindow(string currentShareCode, List<string> hiddenTabs, bool useIconTabs)
+    public SettingsWindow(string currentShareCode, string currentCustomUrl, List<string> hiddenTabs, bool useIconTabs)
     {
         InitializeComponent();
         ShareCodeBox.Text = currentShareCode;
+        CustomUrlBox.Text = currentCustomUrl;
 
         UseIconsToggle.IsChecked = useIconTabs;
         ShowBitcraftSync.IsChecked = !hiddenTabs.Contains("BitcraftSync");
@@ -29,7 +30,9 @@ public partial class SettingsWindow : Window
         ShowCalc.IsChecked = !hiddenTabs.Contains("Calc");
         ShowStats.IsChecked = !hiddenTabs.Contains("Stats");
         ShowClaim.IsChecked = !hiddenTabs.Contains("Claim");
+        ShowRoute.IsChecked = !hiddenTabs.Contains("Route");
         ShowTwitch.IsChecked = !hiddenTabs.Contains("Twitch");
+        ShowCustom.IsChecked = !hiddenTabs.Contains("Custom");
 
         VersionLabel.Text = $"Version {CurrentVersion}";
         Loaded += (_, _) => ShareCodeBox.Focus();
@@ -39,14 +42,6 @@ public partial class SettingsWindow : Window
 
     private void Kofi_Click(object sender, RoutedEventArgs e) =>
         Process.Start(new ProcessStartInfo("https://ko-fi.com/Z6O024TDK7") { UseShellExecute = true });
-
-    private void OpenDataFolder_Click(object sender, RoutedEventArgs e)
-    {
-        Directory.CreateDirectory(Settings.AppDataRoot); // so Explorer has something to open even on first run
-        // ShellExecute on a bare folder path is flaky in some hosting contexts; launching
-        // explorer.exe directly with the path as an argument is the reliable way to do this.
-        Process.Start("explorer.exe", $"\"{Settings.AppDataRoot}\"");
-    }
 
     private async void CheckUpdate_Click(object sender, RoutedEventArgs e)
     {
@@ -94,6 +89,7 @@ public partial class SettingsWindow : Window
         var code = idx >= 0 ? text[(idx + marker.Length)..] : text;
         code = code.Split('?', '#')[0];
         ShareCode = code.Trim('/', ' ');
+        CustomUrl = CustomUrlBox.Text.Trim();
 
         UseIconTabs = UseIconsToggle.IsChecked == true;
 
@@ -105,7 +101,9 @@ public partial class SettingsWindow : Window
         if (ShowCalc.IsChecked != true) HiddenTabs.Add("Calc");
         if (ShowStats.IsChecked != true) HiddenTabs.Add("Stats");
         if (ShowClaim.IsChecked != true) HiddenTabs.Add("Claim");
+        if (ShowRoute.IsChecked != true) HiddenTabs.Add("Route");
         if (ShowTwitch.IsChecked != true) HiddenTabs.Add("Twitch");
+        if (ShowCustom.IsChecked != true) HiddenTabs.Add("Custom");
 
         DialogResult = true;
     }

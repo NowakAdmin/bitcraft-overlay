@@ -263,6 +263,68 @@
             </Grid>
         </Grid>
 
+        <!-- Gathering route planner - also native, also swaps in for the WebView2 instead
+             of navigating anywhere. Whole panel is the map; setup inputs float on top in a
+             corner, web-map-search-box style, rather than pushing the map down. -->
+        <Grid x:Name="RoutePanel" Grid.Column="0" Visibility="Collapsed" Background="#1E1E1E">
+            <Image x:Name="RouteMapImage" Stretch="Uniform" RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+            <TextBlock x:Name="RouteMapPlaceholder" Text="Compute a route to see the map here"
+                       Foreground="White" Opacity="0.4" FontSize="11"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="200"/>
+
+            <Border x:Name="RouteSetupPanel" Background="#DD1E1E1E" CornerRadius="4" Padding="8"
+                    HorizontalAlignment="Left" VerticalAlignment="Top" Margin="6" MaxWidth="210" BorderThickness="1" BorderBrush="#444">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="ROUTE SETUP" FontSize="9" FontWeight="Bold" Opacity="0.8" VerticalAlignment="Center"/>
+                        <Button x:Name="RouteToggleSetupButton" Grid.Column="1" Content="–" Width="18" Height="18" Padding="0" FontSize="11"
+                                Background="#3A3A3A" Foreground="White" BorderThickness="0" Click="RouteToggleSetup_Click"/>
+                    </Grid>
+                    <StackPanel x:Name="RouteSetupBody" Margin="0,6,0,0">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="RoutePlayerNameBox" Grid.Column="0" FontSize="11"/>
+                            <Button Grid.Column="1" Content="Find" Margin="4,0,0,0" Padding="6,2" Click="RouteFindPlayer_Click"/>
+                        </Grid>
+                        <ListBox x:Name="RoutePlayerResultsList" Margin="0,2,0,0" MaxHeight="90" FontSize="11"
+                                 Visibility="Collapsed" SelectionChanged="RoutePlayerResultsList_SelectionChanged"
+                                 DisplayMemberPath="Username"/>
+                        <TextBlock x:Name="RoutePlayerFoundLabel" Style="{StaticResource CalcLabel}" Margin="0,2,0,0" TextWrapping="Wrap"/>
+
+                        <ComboBox x:Name="RouteResourceCombo" Margin="0,8,0,0" FontSize="11"
+                                  IsTextSearchEnabled="True" TextSearch.TextPath="Name" DisplayMemberPath="Name"
+                                  SelectionChanged="RouteResourceCombo_SelectionChanged"/>
+
+                        <CheckBox x:Name="RouteAllowWaterCheck" Content="Allow crossing water (fishing)" Foreground="White" FontSize="11" Margin="0,8,0,0"
+                                  Checked="RouteAllowWaterCheck_Changed" Unchecked="RouteAllowWaterCheck_Changed"/>
+
+                        <Grid Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Zoom" Foreground="White" FontSize="11" VerticalAlignment="Center"/>
+                            <Button Grid.Column="1" Content="−" Width="22" Padding="0" Margin="4,0,0,0" Click="RouteZoomOut_Click"/>
+                            <TextBlock x:Name="RouteZoomLabel" Grid.Column="2" Text="100%" Foreground="White" FontSize="11"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <Button Grid.Column="3" Content="+" Width="22" Padding="0" Click="RouteZoomIn_Click"/>
+                        </Grid>
+
+                        <TextBlock x:Name="RouteStatusLabel" Style="{StaticResource CalcLabel}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+
         <!-- Reserved strip: kept in its own column so it never sits under the WebView2
              HWND, which would otherwise eat the mouse input (airspace issue). Only the
              grip glyph at the bottom is interactive; drag it to resize width + height. -->

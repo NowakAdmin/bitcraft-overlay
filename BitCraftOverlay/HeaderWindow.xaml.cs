@@ -27,8 +27,10 @@ public partial class HeaderWindow : Window
     private readonly MainWindow _content;
     private TwitchWindow? _twitchWindow;
     private bool _dragging;
+    private bool _dragCandidate;
     private Point _dragStartMouse;
     private Point _dragStartWindow;
+    private const double DragThreshold = 4; // pixels of movement before a press-on-a-button counts as a drag, not a click
 
     public HeaderWindow(MainWindow content)
     {
@@ -39,26 +41,46 @@ public partial class HeaderWindow : Window
     // Manual drag, not DragMove(): DragMove() triggers the OS's real window-move
     // (SC_MOVE), which refuses to drag a window's top edge above screen Y=0. Setting
     // Left/Top directly has no such clamp, so the overlay can go anywhere.
-    private void Header_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    //
+    // Hooked as Preview* (tunneling) on the outer Grid, not MouseLeftButtonDown/Up (direct
+    // routing - never reaches an ancestor at all, so a header with no empty space left
+    // between tab buttons had nowhere left to grab). Tunneling reaches here regardless of
+    // which button is directly under the cursor. A press doesn't start the drag immediately
+    // though - only once the mouse actually moves past DragThreshold - so a plain click on a
+    // button still reaches it and fires normally; only pressing THEN dragging takes over the
+    // window move instead.
+    private void Header_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        _dragging = true;
+        _dragCandidate = true;
         _dragStartMouse = PointToScreen(e.GetPosition(this));
         _dragStartWindow = new Point(Left, Top);
-        ((UIElement)sender).CaptureMouse();
     }
 
-    private void Header_MouseMove(object sender, MouseEventArgs e)
+    private void Header_PreviewMouseMove(object sender, MouseEventArgs e)
     {
-        if (!_dragging) return;
+        if (!_dragCandidate || e.LeftButton != MouseButtonState.Pressed) return;
         var current = PointToScreen(e.GetPosition(this));
+        if (!_dragging)
+        {
+            if (Math.Abs(current.X - _dragStartMouse.X) < DragThreshold && Math.Abs(current.Y - _dragStartMouse.Y) < DragThreshold)
+                return;
+            _dragging = true;
+            ((UIElement)sender).CaptureMouse();
+        }
         Left = _dragStartWindow.X + (current.X - _dragStartMouse.X);
         Top = _dragStartWindow.Y + (current.Y - _dragStartMouse.Y);
+        e.Handled = true; // once actually dragging, don't let the button underneath react too
     }
 
-    private void Header_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    private void Header_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
+        if (_dragging)
+        {
+            ((UIElement)sender).ReleaseMouseCapture();
+            e.Handled = true; // swallow the up too, so the button doesn't fire Click after a real drag
+        }
         _dragging = false;
-        ((UIElement)sender).ReleaseMouseCapture();
+        _dragCandidate = false;
     }
 
     private void Tab_Click(object sender, RoutedEventArgs e)
@@ -76,8 +98,16 @@ public partial class HeaderWindow : Window
         TabCalc.Visibility = hidden.Contains("Calc") ? Visibility.Collapsed : Visibility.Visible;
         TabStats.Visibility = hidden.Contains("Stats") ? Visibility.Collapsed : Visibility.Visible;
         TabClaim.Visibility = hidden.Contains("Claim") ? Visibility.Collapsed : Visibility.Visible;
+        TabRoute.Visibility = hidden.Contains("Route") ? Visibility.Collapsed : Visibility.Visible;
         TwitchButton.Visibility = hidden.Contains("Twitch") ? Visibility.Collapsed : Visibility.Visible;
+        // TabCustom is NOT set here - its visibility also depends on whether a URL is actually
+        // configured (Settings.CustomTabUrl), which this method doesn't know about. See
+        // SetCustomTabVisible, called separately by MainWindow with that combined condition.
     }
+
+    /// <summary>Combines the "Custom" HiddenTabs toggle with whether a URL is actually
+    /// configured - see MainWindow.CustomTabShouldBeVisible.</summary>
+    internal void SetCustomTabVisible(bool visible) => TabCustom.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
 
     private const string TwitchTooltip = "Open twitch.tv/bitcraftonline in a separate window (watch the stream, collect drops)";
     private const string TwitchIconPath = "pack://application:,,,/Assets/icons/twitch.ico";
@@ -98,6 +128,14 @@ public partial class HeaderWindow : Window
 
         TabClaim.Content = useIcons ? "🏘" : "Claim";
         TabClaim.Padding = useIcons ? new Thickness(7, 0, 7, 0) : new Thickness(8, 0, 8, 0);
+
+        TabRoute.Content = useIcons ? "🧭" : "Route";
+        TabRoute.Padding = useIcons ? new Thickness(7, 0, 7, 0) : new Thickness(8, 0, 8, 0);
+
+        // No favicon exists for a player-provided URL either - same emoji-glyph treatment as
+        // the native tools above.
+        TabCustom.Content = useIcons ? "🔗" : "Custom";
+        TabCustom.Padding = useIcons ? new Thickness(7, 0, 7, 0) : new Thickness(8, 0, 8, 0);
 
         if (useIcons)
         {
@@ -149,6 +187,8 @@ public partial class HeaderWindow : Window
             _twitchWindow.Show();
         }
     }
+
+    private void ReloadTab_Click(object sender, RoutedEventArgs e) => _content.ReloadCurrentTabToDefault();
 
     private void Minimize_Click(object sender, RoutedEventArgs e) => _content.ToggleMinimized();
 

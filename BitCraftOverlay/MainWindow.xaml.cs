@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -38,10 +39,35 @@ public partial class MainWindow : Window
     private StatSnapshot? _statB;
     private ClaimInfo? _claimInfo;
 
+    // --- Route live-tracking state (see the Route section further down) ---
+    // Two separate connections, not one: a bulk Subscribe REPLACES the whole query set on a
+    // connection, and the relay appears to deliver a combined Subscribe's tables together, not
+    // cheapest-first - confirmed empirically, player position (a single-row query) was arriving
+    // ~10s late, in lockstep with a slow resource_state/location_state fetch it had no business
+    // waiting on. _routePlayerLive carries only mobile_entity_state (subscribed once, never
+    // resubscribed - the player's entity_id doesn't change), so it keeps streaming fast
+    // TransactionUpdates regardless of how long a resource resubscribe on _routeLive takes.
+    private SpacetimeLiveConnection? _routePlayerLive;
+    private SpacetimeLiveConnection? _routeLive;
+    private string? _routePlayerEntityId;
+    private RouteNode? _routePlayerPos; // live, world coords - null until the first position arrives
+    private readonly Dictionary<string, (double X, double Z)> _routeLocationRows = new();
+    private readonly HashSet<string> _routeResourceEntityIds = new();
+    private ResourceType? _routeActiveResource; // set on the UI thread, read from OnRouteRowsChanged's background thread
+    private (double X, double Z)? _routeBoxCenter;
+    private (double X, double Z)? _routeLastRenderedPlayerPos;
+    private (double X, double Z)? _routePendingRecenter;
+    private DateTime _routeLastResubscribe = DateTime.MinValue;
+    private bool _routeDirty;
+    private DispatcherTimer? _routeRecomputeTimer;
+
     public MainWindow()
     {
         InitializeComponent();
-        Browser.CreationProperties = new CoreWebView2CreationProperties { UserDataFolder = Settings.WebView2DataFolder };
+        Browser.CreationProperties = Settings.CreateWebViewCreationProperties();
+        // Route map render targets the panel's actual size (see RecomputeRoute) - a resize needs
+        // a fresh render at the new size, not just a stretched-to-fit old one.
+        RoutePanel.SizeChanged += (_, _) => _routeDirty = true;
         _calcHistory = new ObservableCollection<CalcEntry>(_settings.SavedCalculations);
         CalcHistoryList.ItemsSource = _calcHistory;
         _statComparisons = new ObservableCollection<StatComparison>(_settings.SavedComparisons);
@@ -50,9 +76,17 @@ public partial class MainWindow : Window
         ClaimNameBox.Text = _settings.ClaimName;
         _claimInfo = _settings.SavedClaimData;
         ShowClaimInfo(); // show whatever was saved from the last Find, if any - no need to re-search on every launch
+        RoutePlayerNameBox.Text = _settings.RoutePlayerName;
+        RouteAllowWaterCheck.IsChecked = _settings.RouteAllowWater;
+        RouteZoomLabel.Text = $"{_settings.RouteZoom * 100:F0}%";
         SourceInitialized += MainWindow_SourceInitialized;
         Loaded += MainWindow_Loaded;
         Closing += (_, _) => SaveWindowState();
+        Closing += (_, _) =>
+        {
+            if (_routePlayerLive is not null) _ = _routePlayerLive.DisposeAsync();
+            if (_routeLive is not null) _ = _routeLive.DisposeAsync();
+        };
 
         // Remember whatever URL each tab ends up at (map/market state is encoded
         // in the URL itself), so reopening the app lands back where you left off.
@@ -127,6 +161,7 @@ public partial class MainWindow : Window
         _header.Top = Top - _header.Height;
         _header.ApplyHiddenTabs(_settings.HiddenTabs);
         _header.ApplyDisplayMode(_settings.UseIconTabs);
+        _header.SetCustomTabVisible(CustomTabShouldBeVisible);
         _header.Show();
 
         _header.LocationChanged += (_, _) =>
@@ -234,8 +269,13 @@ public partial class MainWindow : Window
         CalcPanel.Visibility = tab == "Calc" ? Visibility.Visible : Visibility.Collapsed;
         StatsPanel.Visibility = tab == "Stats" ? Visibility.Visible : Visibility.Collapsed;
         ClaimPanel.Visibility = tab == "Claim" ? Visibility.Visible : Visibility.Collapsed;
-        Browser.Visibility = tab is "Calc" or "Stats" or "Claim" ? Visibility.Collapsed : Visibility.Visible;
-        if (tab is "Calc" or "Stats" or "Claim") return;
+        RoutePanel.Visibility = tab == "Route" ? Visibility.Visible : Visibility.Collapsed;
+        Browser.Visibility = tab is "Calc" or "Stats" or "Claim" or "Route" ? Visibility.Collapsed : Visibility.Visible;
+        if (tab is "Calc" or "Stats" or "Claim" or "Route")
+        {
+            if (tab == "Route") _ = EnsureRouteResourceListLoaded(); // lazy-load the resource catalog the first time the tab is shown
+            return;
+        }
 
         Browser.Source = new Uri(_settings.LastTabUrls.TryGetValue(tab, out var savedUrl) && !string.IsNullOrWhiteSpace(savedUrl)
             ? savedUrl
@@ -617,7 +657,12 @@ public partial class MainWindow : Window
         IEnumerable<ClaimMemberInfo> sorted = key switch
         {
             "Name" => Order(_claimInfo.Members, m => m.UserName, _claimSortAscending),
-            "Last seen" => Order(_claimInfo.Members, m => m.LastLoginRaw, _claimSortAscending),
+            // A blank last-seen (the API just doesn't have it for some members) isn't
+            // meaningfully "earliest" - always push those to the end, in both directions,
+            // rather than letting them sort to the top on an ascending click.
+            "Last seen" => _claimSortAscending
+                ? _claimInfo.Members.OrderBy(m => string.IsNullOrEmpty(m.LastLoginRaw)).ThenBy(m => m.LastLoginRaw)
+                : _claimInfo.Members.OrderBy(m => string.IsNullOrEmpty(m.LastLoginRaw)).ThenByDescending(m => m.LastLoginRaw),
             _ => Order(_claimInfo.Members, m => m.SkillLevels.GetValueOrDefault(key), _claimSortAscending),
         };
         ClaimMembersGrid.ItemsSource = sorted.ToList();
@@ -889,40 +934,515 @@ public partial class MainWindow : Window
         ClaimToolsGrid.Visibility = sender == ClaimSubTabTools ? Visibility.Visible : Visibility.Collapsed;
     }
 
+    /// <summary>"Custom" needs both the HiddenTabs toggle AND a configured URL - an
+    /// enabled-but-unconfigured tab would just show a blank browser.</summary>
+    private bool CustomTabShouldBeVisible =>
+        !string.IsNullOrWhiteSpace(_settings.CustomTabUrl) && !_settings.HiddenTabs.Contains("Custom");
+
     private string DefaultUrlFor(string tab) => tab switch
     {
         "Bitjita" => BitjitaUrl,
         "Brico" => BricoUrl,
         "Mapa" => MapUrl,
+        "Custom" => _settings.CustomTabUrl,
         _ => string.IsNullOrWhiteSpace(_settings.BitcraftSyncShareCode)
             ? BitcraftSyncBase
             : $"{BitcraftSyncBase}/s/{_settings.BitcraftSyncShareCode}",
     };
 
+    /// <summary>Re-navigates the currently visible browser tab back to its configured default
+    /// URL, discarding wherever an in-page link may have led - handy for the "Custom" tab
+    /// especially (a claim's own page might link off-site), but works the same for any browser
+    /// tab. No-op on a native tab (Calc/Stats/Claim/Route) - there's no URL to reset there.</summary>
+    internal void ReloadCurrentTabToDefault()
+    {
+        if (Browser.Visibility != Visibility.Visible) return;
+        var url = DefaultUrlFor(_currentTab);
+        if (string.IsNullOrWhiteSpace(url)) return;
+        _settings.LastTabUrls[_currentTab] = url;
+        Browser.Source = new Uri(url);
+    }
+
+    // --- Route: gathering route planner --------------------------------------
+
+    private bool _routeResourceListLoaded;
+    // world units - a common resource (e.g. plain "Bush") can have tens of thousands of matches
+    // even in a modest area, and location_state itself (every entity with a position, not just
+    // resources) runs into the millions across a wide box - confirmed empirically this box was
+    // 2500 before and pulled 3.1M location_state rows + 68,808 matched Bush nodes, which then
+    // hung the UI computing a route over all of them. Was 400 (167,529 location_state rows for
+    // Bush, ~10s to arrive) - shrunk further since that's still slow. Note this only helps
+    // location_state's cost, not resource_state's (187,897 rows for Bush): that one is NOT
+    // geographically filterable in SQL at all, it's the whole region regardless of box size.
+    private const double RouteBoxHalfSize = 200;
+    private const int RouteMaxNodes = 40; // hard cap fed into pathfinding - ponytail: raise if a small box still overwhelms a dense resource
+    private static readonly TimeSpan RouteResubscribeCooldown = TimeSpan.FromSeconds(5);
+    private const double RouteRedrawMinMove = 15; // world units - below this, a position update doesn't trigger a full map redraw
+    private const double RouteZoomMin = 0.4, RouteZoomMax = 3.0, RouteZoomStep = 0.25;
+
+    private async Task EnsureRouteResourceListLoaded()
+    {
+        if (_routeResourceListLoaded) return;
+        try
+        {
+            var types = await RouteApi.GetResourceTypesAsync();
+            RouteResourceCombo.ItemsSource = types;
+            RouteResourceCombo.SelectedItem = types.FirstOrDefault(t => t.Id == _settings.RouteLastResourceId) ?? types.FirstOrDefault();
+            _routeResourceListLoaded = true;
+        }
+        catch
+        {
+            RouteStatusLabel.Text = "Couldn't load the resource list (no internet?).";
+        }
+    }
+
+    private async void RouteFindPlayer_Click(object sender, RoutedEventArgs e)
+    {
+        var name = RoutePlayerNameBox.Text.Trim();
+        if (name.Length < 2)
+        {
+            RoutePlayerFoundLabel.Text = "Type at least 2 characters.";
+            return;
+        }
+        RoutePlayerResultsList.Visibility = Visibility.Collapsed;
+        RoutePlayerFoundLabel.Text = "Searching...";
+        await RunBusy((Button)sender, "...", async () =>
+        {
+            try
+            {
+                var matches = await BitjitaApi.SearchPlayersAsync(name);
+                if (matches.Count == 0)
+                {
+                    RoutePlayerFoundLabel.Text = "No player found.";
+                    return;
+                }
+                _settings.RoutePlayerName = name;
+                _settings.Save();
+
+                var exact = matches.Count == 1
+                    ? matches[0]
+                    : matches.FirstOrDefault(m => string.Equals(m.Username, name, StringComparison.OrdinalIgnoreCase));
+                if (exact is not null)
+                {
+                    RoutePlayerFoundLabel.Text = "";
+                    await SelectRoutePlayerAsync(exact.EntityId, exact.Username);
+                }
+                else
+                {
+                    RoutePlayerResultsList.ItemsSource = matches;
+                    RoutePlayerResultsList.Visibility = Visibility.Visible;
+                    RoutePlayerFoundLabel.Text = $"{matches.Count} matches - pick one.";
+                }
+            }
+            catch
+            {
+                RoutePlayerFoundLabel.Text = "Search failed (no internet?).";
+            }
+        });
+    }
+
+    private async void RoutePlayerResultsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (RoutePlayerResultsList.SelectedItem is not PlayerSearchResult picked) return;
+        RoutePlayerResultsList.Visibility = Visibility.Collapsed;
+        await SelectRoutePlayerAsync(picked.EntityId, picked.Username);
+    }
+
+    /// <summary>Opens (or replaces) the persistent live-tracking connection for the chosen
+    /// player: resolves which region they're live in, connects, and starts a subscription for
+    /// their position - no manual N/E entry, this app now reads it straight from the relay (see
+    /// SpacetimeLiveConnection.cs / bitcraftoverlay-route-spacetimedb memory).</summary>
+    private async Task SelectRoutePlayerAsync(string entityId, string username)
+    {
+        await DisconnectRouteLiveAsync();
+
+        _settings.RoutePlayerEntityId = entityId;
+        _settings.Save();
+        RoutePlayerFoundLabel.Text = $"{username} - locating...";
+        RouteMapImage.Source = null;
+        RouteMapPlaceholder.Visibility = Visibility.Visible;
+
+        try
+        {
+            var pos = await SpacetimeClient.FindPlayerPositionAsync(entityId, _settings.RoutePlayerRegion);
+            if (pos is null)
+            {
+                RoutePlayerFoundLabel.Text = $"{username} - not online live right now.";
+                return;
+            }
+            _settings.RoutePlayerRegion = pos.Value.Region;
+            _settings.Save();
+
+            await TerrainMap.EnsureLoadedAsync();
+
+            _routePlayerEntityId = entityId;
+            _routePlayerPos = new RouteNode(username, pos.Value.WorldX, pos.Value.WorldZ);
+            _routeBoxCenter = (pos.Value.WorldX, pos.Value.WorldZ);
+
+            void WireCommonEvents(SpacetimeLiveConnection conn)
+            {
+                conn.RowsChanged += OnRouteRowsChanged;
+                conn.Disconnected += ex => Dispatcher.Invoke(() =>
+                    RoutePlayerFoundLabel.Text = $"{username} - live connection lost ({ex.Message}).");
+                conn.QueryFailed += msg => Dispatcher.Invoke(() => RouteStatusLabel.Text = $"Query failed: {msg}");
+            }
+
+            _routePlayerLive = new SpacetimeLiveConnection();
+            WireCommonEvents(_routePlayerLive);
+            await _routePlayerLive.ConnectAsync(pos.Value.Region);
+            await _routePlayerLive.SubscribeAsync(new[] { $"SELECT * FROM mobile_entity_state WHERE entity_id = {entityId}" });
+
+            _routeLive = new SpacetimeLiveConnection();
+            WireCommonEvents(_routeLive);
+            await _routeLive.ConnectAsync(pos.Value.Region);
+
+            _routeRecomputeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
+            _routeRecomputeTimer.Tick += (_, _) =>
+            {
+                if (_routePendingRecenter is { } pending && DateTime.UtcNow - _routeLastResubscribe >= RouteResubscribeCooldown)
+                {
+                    _routeBoxCenter = pending;
+                    _routePendingRecenter = null;
+                    _routeLastResubscribe = DateTime.UtcNow;
+                    _ = ResubscribeRouteQueriesAsync();
+                }
+                if (_routeDirty) { _routeDirty = false; RecomputeRoute(); }
+            };
+            _routeRecomputeTimer.Start();
+
+            await ResubscribeRouteQueriesAsync();
+            RoutePlayerFoundLabel.Text = $"{username} - live (region {pos.Value.Region}).";
+            _routeDirty = true;
+        }
+        catch (Exception ex)
+        {
+            RoutePlayerFoundLabel.Text = $"{username} - live tracking failed: {ex.Message}";
+        }
+    }
+
+    private async void RouteResourceCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (RouteResourceCombo.SelectedItem is ResourceType resource)
+        {
+            _settings.RouteLastResourceId = resource.Id;
+            _settings.Save();
+        }
+        if (_routeLive is not null) await ResubscribeRouteQueriesAsync();
+    }
+
+    private void RouteAllowWaterCheck_Changed(object sender, RoutedEventArgs e)
+    {
+        _settings.RouteAllowWater = RouteAllowWaterCheck.IsChecked == true;
+        _settings.Save();
+        _routeDirty = true;
+    }
+
+    private void RouteZoomIn_Click(object sender, RoutedEventArgs e) => AdjustRouteZoom(-RouteZoomStep);
+    private void RouteZoomOut_Click(object sender, RoutedEventArgs e) => AdjustRouteZoom(RouteZoomStep);
+
+    private void AdjustRouteZoom(double delta)
+    {
+        _settings.RouteZoom = Math.Clamp(_settings.RouteZoom + delta, RouteZoomMin, RouteZoomMax);
+        RouteZoomLabel.Text = $"{_settings.RouteZoom * 100:F0}%";
+        _settings.Save();
+        _routeDirty = true;
+    }
+
+    /// <summary>Sends the desired resource/creature query set for the box around the player -
+    /// player position itself lives on the separate _routePlayerLive connection now (see its
+    /// field doc comment for why) and is never part of this. A bulk Subscribe REPLACES the whole
+    /// set on a connection each call, so every query still wanted has to be resent together, not
+    /// just the one that changed - see SpacetimeLiveConnection's docs.</summary>
+    private async Task ResubscribeRouteQueriesAsync()
+    {
+        if (_routeLive is null) return;
+
+        _routeLocationRows.Clear();
+        _routeResourceEntityIds.Clear();
+        // OnRouteRowsChanged runs on the connection's background thread, where touching a WPF
+        // control (RouteResourceCombo.SelectedItem) would throw - stash the selection here on
+        // the UI thread instead, for that handler to read.
+        _routeActiveResource = RouteResourceCombo.SelectedItem as ResourceType;
+
+        var queries = new List<string>();
+        if (_routeActiveResource is { Kind: ResourceKind.Resource } resource && _routeBoxCenter is { } center)
+        {
+            // Integer-truncate the box bounds and format invariantly - a raw interpolated
+            // double would render with a comma on e.g. pl-PL (System.Globalization current
+            // culture), producing invalid SQL that silently breaks the whole combined
+            // Subscribe call, not just this query.
+            var (cx, cz) = center;
+            int xLo = (int)(cx - RouteBoxHalfSize), xHi = (int)(cx + RouteBoxHalfSize);
+            int zLo = (int)(cz - RouteBoxHalfSize), zHi = (int)(cz + RouteBoxHalfSize);
+            queries.Add($"SELECT * FROM resource_state WHERE resource_id = {resource.Id}");
+            queries.Add($"SELECT * FROM location_state WHERE x > {xLo} AND x < {xHi} AND z > {zLo} AND z < {zHi}");
+        }
+        else if (_routeActiveResource is { Kind: ResourceKind.Creature })
+        {
+            // Creatures live in enemy_mob_monitor_state (entity_id, enemy_type, herd_entity_id,
+            // herd_location{x,z,dimension}) - no join needed, position is right there. Can't
+            // filter server-side by species (the SQL subset rejects equality on the enemy_type
+            // sum-type column - confirmed empirically, "literal cannot be parsed"/"not in
+            // scope"), but the whole table is only ~11k rows region-wide, so fetch it all and
+            // filter by enemy_type client-side in OnRouteRowsChanged instead.
+            queries.Add("SELECT * FROM enemy_mob_monitor_state");
+        }
+        if (queries.Count == 0) return; // no resource picked yet - nothing to subscribe to
+        await _routeLive.SubscribeAsync(queries.ToArray());
+    }
+
+    /// <summary>Applies one insert/delete batch to the live caches. Runs on the connection's
+    /// background thread - everything here just updates plain dictionaries/fields and flips
+    /// _routeDirty; the actual UI/map update happens on the next recompute timer tick on the UI
+    /// thread (see RecomputeRoute), so no Dispatcher marshaling is needed in here.</summary>
+    private void OnRouteRowsChanged(string table, List<JsonElement> inserts, List<JsonElement> deletes)
+    {
+        JsonElement F(JsonElement row, string field) => SpacetimeLiveConnection.GetField(row, table, field);
+        var meaningfulChange = table != "mobile_entity_state"; // node appear/disappear always redraws
+
+        switch (table)
+        {
+            case "mobile_entity_state":
+                foreach (var row in inserts)
+                {
+                    var x = F(row, "location_x").GetDouble() / 1000.0;
+                    var z = F(row, "location_z").GetDouble() / 1000.0;
+                    _routePlayerPos = _routePlayerPos is { } prev ? prev with { X = x, Z = z } : new RouteNode("You", x, z);
+                    // SpacetimeDB pushes a position update on every single game-side movement
+                    // tick while walking - redrawing the whole map that often looked like it was
+                    // constantly re-rendering for no visible reason. Only actually redraw once
+                    // the player has moved a meaningfully-visible amount since the last redraw.
+                    if (_routeLastRenderedPlayerPos is not { } last || Math.Abs(x - last.X) > RouteRedrawMinMove || Math.Abs(z - last.Z) > RouteRedrawMinMove)
+                    {
+                        _routeLastRenderedPlayerPos = (x, z);
+                        meaningfulChange = true;
+                    }
+                    // Recenter the search box once the player has wandered halfway to its edge -
+                    // just records the intent here; the recompute timer actually acts on it,
+                    // rate-limited (see RouteResubscribeCooldown), so a player walking
+                    // continuously can't trigger a fresh resource_state/location_state fetch
+                    // (expensive - real ones have run 40+ seconds for a common resource) on
+                    // every single step.
+                    if (_routeBoxCenter is not { } c || Math.Abs(x - c.X) > RouteBoxHalfSize / 2 || Math.Abs(z - c.Z) > RouteBoxHalfSize / 2)
+                        _routePendingRecenter = (x, z);
+                }
+                if (deletes.Count > 0 && inserts.Count == 0) { _routePlayerPos = null; meaningfulChange = true; } // player went offline / left the region
+                break;
+
+            // Deletes are applied before inserts in both cases below: an in-place row update
+            // arrives as a delete(old)+insert(new) pair for the same entity_id in one batch, and
+            // the insert must win - doing it the other way round would erase the fresh value.
+            case "resource_state":
+                foreach (var row in deletes) _routeResourceEntityIds.Remove(F(row, "entity_id").ToString()!);
+                foreach (var row in inserts) _routeResourceEntityIds.Add(F(row, "entity_id").ToString()!);
+                break;
+
+            case "location_state":
+                foreach (var row in deletes) _routeLocationRows.Remove(F(row, "entity_id").ToString()!);
+                foreach (var row in inserts)
+                    _routeLocationRows[F(row, "entity_id").ToString()!] = (F(row, "x").GetDouble(), F(row, "z").GetDouble());
+                break;
+
+            // Creatures: entity_id/position both live right here, no location_state join needed
+            // - see the comment in ResubscribeRouteQueriesAsync. enemy_type is a sum type
+            // ([tagIndex, payload]) and always array-encoded regardless of context (confirmed
+            // empirically, unlike Products) - reading index 0 directly is safe.
+            case "enemy_mob_monitor_state":
+                if (_routeActiveResource is not { Kind: ResourceKind.Creature } creature) break;
+                foreach (var row in deletes)
+                {
+                    var id = F(row, "entity_id").ToString()!;
+                    _routeResourceEntityIds.Remove(id);
+                    _routeLocationRows.Remove(id);
+                }
+                foreach (var row in inserts)
+                {
+                    if (F(row, "enemy_type")[0].GetInt32() != creature.Id) continue;
+                    var id = F(row, "entity_id").ToString()!;
+                    var herdLoc = F(row, "herd_location");
+                    var x = SpacetimeLiveConnection.GetNestedField(herdLoc, SpacetimeLiveConnection.HerdLocationColumns, "x").GetDouble();
+                    var z = SpacetimeLiveConnection.GetNestedField(herdLoc, SpacetimeLiveConnection.HerdLocationColumns, "z").GetDouble();
+                    _routeResourceEntityIds.Add(id);
+                    _routeLocationRows[id] = (x, z);
+                }
+                break;
+        }
+        if (meaningfulChange) _routeDirty = true;
+    }
+
+    /// <summary>Redraws the map from whatever's currently in the live caches. Runs on the UI
+    /// thread (called from the DispatcherTimer tick), so it can touch UI elements directly.</summary>
+    private void RecomputeRoute()
+    {
+        if (_routePlayerPos is not { } player)
+        {
+            RouteMapImage.Source = null;
+            RouteMapPlaceholder.Visibility = Visibility.Visible;
+            return;
+        }
+
+        var resource = RouteResourceCombo.SelectedItem as ResourceType;
+        // Cap to the nearest RouteMaxNodes within a bounded radius before clustering/pathfinding.
+        // Resource nodes are already geographically boxed server-side (see
+        // ResubscribeRouteQueriesAsync), but creatures (enemy_mob_monitor_state) are NOT - the
+        // SQL subset can't filter that table server-side at all, so its "nearest 50 of ~1000
+        // region-wide" can span thousands of units and cross water. That blew up 2-opt: each
+        // water-crossing pair falls back to a full A* search (up to 300k nodes), and 2-opt calls
+        // distance() tens of thousands of times - confirmed empirically, this hung the UI for
+        // ~20s on a real Sagi Bird test. The radius cutoff below applies to both kinds, so a
+        // resource somehow returning distant matches gets the same protection.
+        const double maxNodeDistance = RouteBoxHalfSize * 1.5;
+        var nearby = resource is null
+            ? new List<(double X, double Z)>()
+            : _routeResourceEntityIds.Where(_routeLocationRows.ContainsKey)
+                .Select(id => _routeLocationRows[id])
+                .Select(p => (p, distSq: (p.X - player.X) * (p.X - player.X) + (p.Z - player.Z) * (p.Z - player.Z)))
+                .Where(t => t.distSq <= maxNodeDistance * maxNodeDistance)
+                .OrderBy(t => t.distSq)
+                .Select(t => t.p)
+                .ToList();
+        // Only the nearest RouteMaxNodes actually get pathfound (2-opt is O(n^2) - see the radius
+        // comment above), but the rest of `nearby` isn't wasted: shown as plain dots on the map
+        // below, since we already fetched the data anyway.
+        var nodeCoords = RoutePlanner.WithClusterSizes(
+            nearby.Take(RouteMaxNodes).Select(p => new RouteNode(resource?.Name ?? "", p.X, p.Z)).ToList(), radius: 30);
+
+        try
+        {
+            // Water avoidance is a checkbox, not automatic - fishing/water-based gathering needs
+            // to walk straight through it, so the Euclidean distance is used as-is in that case
+            // instead of routing around.
+            var avoidWater = RouteAllowWaterCheck.IsChecked != true;
+            Func<RouteNode, RouteNode, double> distance = avoidWater
+                ? (a, b) => TerrainMap.PathDistance(a.X, a.Z, b.X, b.Z)
+                : (a, b) => Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Z - b.Z) * (a.Z - b.Z));
+
+            List<RouteNode> route = nodeCoords.Count == 0
+                ? new List<RouteNode> { player }
+                : RoutePlanner.BuildRoute(player, nodeCoords, null, distance, preferHotspots: true);
+
+            // A node can be the tour's next-in-order choice by (penalized) distance while still
+            // having no actual walked path to it from wherever the route currently stands (e.g.
+            // a separate island) - PathDistance pads that case in the ordering math, but the
+            // node can still end up in the sequence. Rather than truncating the WHOLE rest of
+            // the route at the first such node (which threw away later stops that genuinely were
+            // reachable), skip just that one node - stay at the current stop and try the next
+            // node in tour order instead. Skipped nodes go back to being plain dots (extraNodes).
+            var extras = nearby.Skip(RouteMaxNodes).ToList();
+            if (avoidWater && route.Count > 1)
+            {
+                var kept = new List<RouteNode> { route[0] };
+                foreach (var next in route.Skip(1))
+                {
+                    if (TerrainMap.GetWalkPath(kept[^1].X, kept[^1].Z, next.X, next.Z) is not null)
+                        kept.Add(next);
+                    else
+                        extras.Add((next.X, next.Z));
+                }
+                route = kept;
+            }
+
+            // Render at the panel's actual current size (not a fixed square) - this app usually
+            // runs as a small, non-square floating window (as small as ~200x200), and a fixed
+            // square render only filled that without black letterbox bars by coincidence.
+            var outputWidth = (int)Math.Max(RoutePanel.ActualWidth, 50);
+            var outputHeight = (int)Math.Max(RoutePanel.ActualHeight, 50);
+            var image = RouteMapRenderer.Render(route, hasEnd: false, avoidWater, extras, outputWidth, outputHeight, _settings.RouteZoom);
+            RouteMapImage.Source = image;
+            RouteMapPlaceholder.Visibility = image is null ? Visibility.Visible : Visibility.Collapsed;
+            RouteStatusLabel.Text = resource is null
+                ? "Live position - pick a resource to see nodes and a route."
+                : $"Live - {nearby.Count} {resource.Name} node(s) nearby ({route.Count - 1} routed).";
+        }
+        catch (Exception ex)
+        {
+            RouteStatusLabel.Text = $"Couldn't render the route: {ex.Message}";
+        }
+    }
+
+    private async Task DisconnectRouteLiveAsync()
+    {
+        _routeRecomputeTimer?.Stop();
+        _routeRecomputeTimer = null;
+        if (_routePlayerLive is not null)
+        {
+            await _routePlayerLive.DisposeAsync();
+            _routePlayerLive = null;
+        }
+        if (_routeLive is not null)
+        {
+            await _routeLive.DisposeAsync();
+            _routeLive = null;
+        }
+        _routePlayerEntityId = null;
+        _routePlayerPos = null;
+        _routeBoxCenter = null;
+        _routeLastRenderedPlayerPos = null;
+        _routePendingRecenter = null;
+        _routeLastResubscribe = DateTime.MinValue;
+        _routeLocationRows.Clear();
+        _routeResourceEntityIds.Clear();
+    }
+
+    private void RouteToggleSetup_Click(object sender, RoutedEventArgs e)
+    {
+        var collapse = RouteSetupBody.Visibility == Visibility.Visible;
+        RouteSetupBody.Visibility = collapse ? Visibility.Collapsed : Visibility.Visible;
+        RouteToggleSetupButton.Content = collapse ? "+" : "–";
+    }
+
     // --- Settings -----------------------------------------------------------
 
-    internal void OpenSettings(Window owner)
+    internal async void OpenSettings(Window owner)
     {
-        var dialog = new SettingsWindow(_settings.BitcraftSyncShareCode, _settings.HiddenTabs, _settings.UseIconTabs) { Owner = owner };
+        var dialog = new SettingsWindow(_settings.BitcraftSyncShareCode, _settings.CustomTabUrl, _settings.HiddenTabs, _settings.UseIconTabs) { Owner = owner };
         if (dialog.ShowDialog() == true)
         {
+            // Route's live tracking (two persistent WebSocket connections + a recompute timer)
+            // keeps running in the background regardless of which tab is currently showing, by
+            // design - that's what makes it "live" across tab switches. But if the tab gets
+            // turned off in Settings entirely, there's no reason for any of that to keep running
+            // - tear it down rather than leave it working for a tab the user can no longer reach.
+            var routeJustHidden = !_settings.HiddenTabs.Contains("Route") && dialog.HiddenTabs.Contains("Route");
+
             _settings.BitcraftSyncShareCode = dialog.ShareCode;
+            var customUrlChanged = _settings.CustomTabUrl != dialog.CustomUrl;
+            _settings.CustomTabUrl = dialog.CustomUrl;
             _settings.HiddenTabs = dialog.HiddenTabs;
             _settings.UseIconTabs = dialog.UseIconTabs;
+            if (routeJustHidden)
+            {
+                await DisconnectRouteLiveAsync();
+                TerrainMap.Unload();
+                RouteMapImage.Source = null;
+                // Dropping references makes the terrain bitmap/live-tracking dictionaries
+                // eligible for collection, but .NET doesn't necessarily reclaim that memory (or
+                // hand it back to the OS) right away on its own schedule - forcing a collection
+                // here is a deliberate one-off (the user just explicitly turned off a heavy
+                // feature), not something to do on a hot path.
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+            }
             _settings.LastTabUrls.Remove("BitcraftSync");
+            if (customUrlChanged) _settings.LastTabUrls.Remove("Custom"); // a freshly-saved URL should take effect immediately, not whatever was last loaded there
             _dirty = true;
             _settings.Save();
             _header?.ApplyHiddenTabs(_settings.HiddenTabs);
             _header?.ApplyDisplayMode(_settings.UseIconTabs);
 
-            if (_settings.HiddenTabs.Contains(_currentTab))
+            _header?.SetCustomTabVisible(CustomTabShouldBeVisible);
+
+            var visibleTabs = new[] { "BitcraftSync", "Bitjita", "Brico", "Mapa", "Calc", "Stats", "Claim", "Route" }
+                .Concat(CustomTabShouldBeVisible ? new[] { "Custom" } : Array.Empty<string>());
+            if (_settings.HiddenTabs.Contains(_currentTab) || (_currentTab == "Custom" && !CustomTabShouldBeVisible))
             {
-                var firstVisible = new[] { "BitcraftSync", "Bitjita", "Brico", "Mapa", "Calc", "Stats", "Claim" }.FirstOrDefault(t => !_settings.HiddenTabs.Contains(t));
+                var firstVisible = visibleTabs.FirstOrDefault(t => !_settings.HiddenTabs.Contains(t));
                 if (firstVisible != null) ShowTab(firstVisible);
             }
-            else if (_settings.LastTab == "BitcraftSync")
+            else if (_settings.LastTab == "BitcraftSync" || (_currentTab == "Custom" && customUrlChanged))
             {
-                ShowTab("BitcraftSync");
+                ShowTab(_currentTab); // re-navigate to pick up the freshly-saved share code / custom URL
             }
         }
     }

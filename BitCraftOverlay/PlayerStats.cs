@@ -26,6 +26,10 @@ public class StatComparison
     public StatSnapshot B { get; set; } = new();
 }
 
+/// <summary>One row of a BitjitaApi.SearchPlayersAsync result - a plain record (not a tuple) so
+/// it binds cleanly to a WPF ListBox's DisplayMemberPath.</summary>
+public record PlayerSearchResult(string EntityId, string Username);
+
 /// <summary>
 /// Thin client for bitjita.com's public player API. The field shapes below were
 /// reverse-engineered from live responses (the published docs don't detail them) -
@@ -57,6 +61,19 @@ public static class BitjitaApi
         }
         if (best is null) return null;
         return (best.Value.GetProperty("entityId").GetString()!, best.Value.GetProperty("username").GetString()!);
+    }
+
+    /// <summary>Every player matching the search text, for a pick-one-from-a-list UI (unlike
+    /// FindPlayerAsync, which collapses to a single best guess).</summary>
+    public static async Task<List<PlayerSearchResult>> SearchPlayersAsync(string name)
+    {
+        var json = await Http.GetStringAsync($"https://bitjita.com/api/players?q={Uri.EscapeDataString(name)}");
+        using var doc = JsonDocument.Parse(json);
+        var result = new List<PlayerSearchResult>();
+        if (!doc.RootElement.TryGetProperty("players", out var players)) return result;
+        foreach (var p in players.EnumerateArray())
+            result.Add(new PlayerSearchResult(p.GetProperty("entityId").GetString()!, p.GetProperty("username").GetString()!));
+        return result;
     }
 
     public static async Task<StatSnapshot> TakeSnapshotAsync(string entityId)

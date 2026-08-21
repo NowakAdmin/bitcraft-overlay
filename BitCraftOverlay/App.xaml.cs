@@ -1,4 +1,4 @@
-using System.Configuration;
+﻿using System.Configuration;
 using System.Data;
 using System.Windows;
 
@@ -15,9 +15,10 @@ public partial class App : Application
         // whole process with no message (that's what happened before this existed).
         DispatcherUnhandledException += (_, e) =>
         {
-            MessageBox.Show($"Wystąpił błąd:\n{e.Exception.Message}", "BitCraft Overlay",
+            MessageBox.Show($"An error occurred:\n{e.Exception.Message}", "BitCraft Overlay",
                 MessageBoxButton.OK, MessageBoxImage.Error);
             e.Handled = true;
         };
     }
 }
+

@@ -1,4 +1,10 @@
 bin/
 obj/
-*.user
+publish-fx-zip/
+publish-self-contained/
+*.zip
+/BitCraftOverlay.exe
 run.log
+# Portable app data now lives next to the .exe (see Settings.AppDataRoot) - never commit or
+# ship a populated one, it'd leak whoever built/tested it into the repo/release.
+Data/
