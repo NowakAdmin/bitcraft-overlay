@@ -71,6 +71,32 @@ public class Settings
     /// spread out.</summary>
     public double RouteZoom { get; set; } = 1.0;
 
+    /// <summary>Route tab overlay mode: while showing Route, the whole overlay window
+    /// (not the topbar - that's a separate always-opaque window) becomes click-through,
+    /// so mouse input falls to BitCraft underneath instead of hitting the overlay. Off
+    /// by default - a click-through window can't be interacted with normally, so this
+    /// is an explicit opt-in, not something a Route visit should silently trigger.</summary>
+    public bool RouteClickThrough { get; set; }
+
+    /// <summary>Route tab overlay opacity, 0.0-1.0 (same convention as RouteZoom).
+    /// Applied as native window alpha only while the Route tab is showing; every other
+    /// tab, and the topbar, stay fully opaque regardless of this value.</summary>
+    public double RouteOpacity { get; set; } = 1.0;
+
+    /// <summary>When on, the Route map renders ONLY the pathfinding line + resource node
+    /// dots (no terrain background, no player marker) against a genuinely transparent
+    /// window background, and frames the view centered on the player's own position
+    /// instead of auto-fitting the route's bounding box - meant to be positioned over
+    /// BitCraft's own in-game minimap (which already keeps the player centered), adding
+    /// route guidance on top of it rather than replacing it with our own synthetic map.
+    /// Pair with RouteClickThrough so clicks still reach the game's minimap underneath.</summary>
+    public bool RouteUseInGameMap { get; set; }
+
+    /// <summary>Whether to draw the dim, unnumbered dots for every nearby matching resource
+    /// beyond what RouteMaxNodes actually routes through - on by default, but useful to turn
+    /// off when a dense resource area makes those extra dots too cluttered to read.</summary>
+    public bool RouteShowExtraNodes { get; set; } = true;
+
     /// <summary>Everything the app saves lives under here, so one folder (and one "show my data"
     /// button) covers it all. Next to the .exe (in a "Data" subfolder), not %LocalAppData% - the
     /// app is meant to be portable (unzip anywhere, including a USB stick or a synced folder,

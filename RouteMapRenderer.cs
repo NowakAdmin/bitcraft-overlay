@@ -42,20 +42,41 @@ public static class RouteMapRenderer
     /// <param name="zoom">Multiplier on the auto-fit frame around the route's own stops - 1.0
     /// is the default framing, smaller zooms in, larger zooms out. Applied in pixel space,
     /// before the aspect-ratio correction, so it composes cleanly with a non-square window.</param>
+    /// <param name="useInGameMap">Skips the terrain background and the player (start) marker,
+    /// and frames the view centered on the player's own position (route[0]) instead of the
+    /// route's bounding box - meant to overlay BitCraft's own in-game minimap instead of
+    /// replacing it. Untouched pixels stay alpha-0 (no background fill), so the caller's
+    /// window background must also be transparent for this to actually show through.</param>
     public static BitmapSource? Render(List<RouteNode> route, bool hasEnd, bool avoidWater,
-        IReadOnlyList<(double X, double Z)>? extraNodes, int outputWidth, int outputHeight, double zoom = 1.0)
+        IReadOnlyList<(double X, double Z)>? extraNodes, int outputWidth, int outputHeight, double zoom = 1.0,
+        bool useInGameMap = false)
     {
         var map = TerrainMap.MapBitmap;
         if (map is null || route.Count == 0) return null;
         outputWidth = Math.Max(1, outputWidth);
         outputHeight = Math.Max(1, outputHeight);
 
-        var minX = route.Min(n => n.X);
-        var maxX = route.Max(n => n.X);
-        var minZ = route.Min(n => n.Z);
-        var maxZ = route.Max(n => n.Z);
-        var pad = Math.Max(Math.Max(maxX - minX, maxZ - minZ) * 0.15, 150);
-        minX -= pad; maxX += pad; minZ -= pad; maxZ += pad;
+        double minX, maxX, minZ, maxZ;
+        if (useInGameMap)
+        {
+            // Centered on the player (route[0]), not the route's bounding box - the in-game
+            // minimap already keeps the player centered, so our overlay has to match that
+            // framing convention for the drawn nodes/lines to land in the right places. The
+            // zoom parameter (applied uniformly below, same as the other branch) controls the
+            // actual span from here.
+            const double half = 300;
+            minX = route[0].X - half; maxX = route[0].X + half;
+            minZ = route[0].Z - half; maxZ = route[0].Z + half;
+        }
+        else
+        {
+            minX = route.Min(n => n.X);
+            maxX = route.Max(n => n.X);
+            minZ = route.Min(n => n.Z);
+            maxZ = route.Max(n => n.Z);
+            var pad = Math.Max(Math.Max(maxX - minX, maxZ - minZ) * 0.15, 150);
+            minX -= pad; maxX += pad; minZ -= pad; maxZ += pad;
+        }
         minX = Math.Clamp(minX, 0, TerrainMap.WorldSpan);
         minZ = Math.Clamp(minZ, 0, TerrainMap.WorldSpan);
         maxX = Math.Clamp(maxX, 0, TerrainMap.WorldSpan);
@@ -113,7 +134,10 @@ public static class RouteMapRenderer
         RenderOptions.SetBitmapScalingMode(visual, BitmapScalingMode.NearestNeighbor);
         using (var dc = visual.RenderOpen())
         {
-            dc.DrawImage(cropped, new Rect(0, 0, outputWidth, outputHeight));
+            // Untouched pixels stay alpha-0 (RenderTargetBitmap starts fully transparent) -
+            // skipping this draw is what lets the real in-game minimap show through instead
+            // of our own terrain crop.
+            if (!useInGameMap) dc.DrawImage(cropped, new Rect(0, 0, outputWidth, outputHeight));
 
             for (var i = 1; i < route.Count; i++)
             {
@@ -143,6 +167,10 @@ public static class RouteMapRenderer
             for (var i = route.Count - 1; i >= 0; i--)
             {
                 var isStart = i == 0;
+                // The player marker is redundant (and misleading - it wouldn't track the
+                // in-game minimap's own player icon) when this overlay sits on top of the
+                // real minimap, which already shows the player at its own center.
+                if (isStart && useInGameMap) continue;
                 var isEnd = hasEnd && i == route.Count - 1;
                 var brush = isStart ? StartBrush : isEnd ? EndBrush : NodeBrush;
                 var radius = isStart || isEnd ? 9.0 : 7.0;

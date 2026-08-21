@@ -108,6 +108,18 @@
             <TextBlock Text="Custom (needs a URL above)" VerticalAlignment="Center" Margin="8,0,0,0"/>
         </StackPanel>
 
+        <TextBlock Text="Route tab overlay:" Margin="0,16,0,6"/>
+        <StackPanel Style="{StaticResource ToggleRow}">
+            <ToggleButton x:Name="RouteClickThroughToggle" Style="{StaticResource ToggleSwitch}"/>
+            <TextBlock Text="Click-through (mouse passes to the game underneath)" VerticalAlignment="Center" Margin="8,0,0,0" TextWrapping="Wrap"/>
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+            <TextBlock Text="Opacity:" VerticalAlignment="Center" Width="50"/>
+            <Slider x:Name="RouteOpacitySlider" Minimum="0" Maximum="100" Width="220" ValueChanged="RouteOpacitySlider_ValueChanged"/>
+            <TextBlock x:Name="RouteOpacityLabel" VerticalAlignment="Center" Margin="6,0,0,0" Width="36"/>
+        </StackPanel>
+        <TextBlock Text="Applies only while the Route tab is showing - the topbar always stays fully visible and clickable." TextWrapping="Wrap" FontSize="10" Opacity="0.6" Margin="0,4,0,0"/>
+
         <Button Content="☕ Support on Ko-fi" Padding="8,4" Margin="0,16,0,0" HorizontalAlignment="Left"
                 Background="#72A4F2" Foreground="White" BorderThickness="0" Click="Kofi_Click"/>
 

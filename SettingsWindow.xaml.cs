@@ -15,14 +15,18 @@ public partial class SettingsWindow : Window
     public string CustomUrl { get; private set; } = "";
     public List<string> HiddenTabs { get; private set; } = new();
     public bool UseIconTabs { get; private set; }
+    public bool RouteClickThrough { get; private set; }
+    public double RouteOpacity { get; private set; } = 1.0;
 
-    public SettingsWindow(string currentShareCode, string currentCustomUrl, List<string> hiddenTabs, bool useIconTabs)
+    public SettingsWindow(string currentShareCode, string currentCustomUrl, List<string> hiddenTabs, bool useIconTabs, bool routeClickThrough, double routeOpacity)
     {
         InitializeComponent();
         ShareCodeBox.Text = currentShareCode;
         CustomUrlBox.Text = currentCustomUrl;
 
         UseIconsToggle.IsChecked = useIconTabs;
+        RouteClickThroughToggle.IsChecked = routeClickThrough;
+        RouteOpacitySlider.Value = Math.Clamp(routeOpacity, 0.0, 1.0) * 100;
         ShowBitcraftSync.IsChecked = !hiddenTabs.Contains("BitcraftSync");
         ShowBitjita.IsChecked = !hiddenTabs.Contains("Bitjita");
         ShowBrico.IsChecked = !hiddenTabs.Contains("Brico");
@@ -37,6 +41,9 @@ public partial class SettingsWindow : Window
         VersionLabel.Text = $"Version {CurrentVersion}";
         Loaded += (_, _) => ShareCodeBox.Focus();
     }
+
+    private void RouteOpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e) =>
+        RouteOpacityLabel.Text = $"{RouteOpacitySlider.Value:F0}%";
 
     private static string CurrentVersion => Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
 
@@ -92,6 +99,8 @@ public partial class SettingsWindow : Window
         CustomUrl = CustomUrlBox.Text.Trim();
 
         UseIconTabs = UseIconsToggle.IsChecked == true;
+        RouteClickThrough = RouteClickThroughToggle.IsChecked == true;
+        RouteOpacity = RouteOpacitySlider.Value / 100.0;
 
         HiddenTabs = new List<string>();
         if (ShowBitcraftSync.IsChecked != true) HiddenTabs.Add("BitcraftSync");

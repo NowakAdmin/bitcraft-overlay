@@ -16,6 +16,10 @@ namespace BitCraftOverlay;
 
 public partial class MainWindow : Window
 {
+    // Matches RouteOverlayWindow.xaml's RouteRoot Background - restored when RouteUseInGameMap
+    // is turned back off (that mode swaps it to Brushes.Transparent so the real minimap shows through).
+    private static readonly Brush RouteRootNormalBackground = new SolidColorBrush(Color.FromRgb(0x1E, 0x1E, 0x1E));
+
     private const string BitcraftSyncBase = "https://bitcraftsync.app";
     private const string BitjitaUrl = "https://bitjita.com/market";
     private const string BricoUrl = "https://brico.app";
@@ -33,6 +37,7 @@ public partial class MainWindow : Window
     private bool _dirty;
     private nint _hwnd;
     private HeaderWindow? _header;
+    private RouteOverlayWindow? _routeOverlay;
     private readonly ObservableCollection<CalcEntry> _calcHistory;
     private readonly ObservableCollection<StatComparison> _statComparisons;
     private StatSnapshot? _statA;
@@ -76,9 +81,6 @@ public partial class MainWindow : Window
         ClaimNameBox.Text = _settings.ClaimName;
         _claimInfo = _settings.SavedClaimData;
         ShowClaimInfo(); // show whatever was saved from the last Find, if any - no need to re-search on every launch
-        RoutePlayerNameBox.Text = _settings.RoutePlayerName;
-        RouteAllowWaterCheck.IsChecked = _settings.RouteAllowWater;
-        RouteZoomLabel.Text = $"{_settings.RouteZoom * 100:F0}%";
         SourceInitialized += MainWindow_SourceInitialized;
         Loaded += MainWindow_Loaded;
         Closing += (_, _) => SaveWindowState();
@@ -118,6 +120,10 @@ public partial class MainWindow : Window
     // Testing showed BitCraft doesn't minimize when it loses focus, so the whole
     // reason for that lockout doesn't apply - the window now activates normally.
     // WS_EX_TOOLWINDOW hides it from Alt+Tab.
+    /// <summary>MainWindow.Settings accessor for RouteOverlayWindow - it needs
+    /// RouteClickThrough/RouteOpacity but shouldn't own a second Settings instance.</summary>
+    internal Settings RouteSettings => _settings;
+
     private void MainWindow_SourceInitialized(object? sender, EventArgs e)
     {
         _hwnd = new WindowInteropHelper(this).Handle;
@@ -141,6 +147,22 @@ public partial class MainWindow : Window
         {
             PositionOverGameWindow();
         }
+
+        // Route's map + setup panel window - see RouteOverlayWindow's own summary for
+        // why it's separate from MainWindow. Created and positioned before ShowTab
+        // below, since ShowTab shows/hides it and applies its overlay state.
+        _routeOverlay = new RouteOverlayWindow(this) { Owner = this };
+        _routeOverlay.Left = Left;
+        _routeOverlay.Top = Top;
+        _routeOverlay.Width = Math.Max(Width - 14, 50); // minus the resize-grip strip's own column
+        _routeOverlay.Height = Height;
+        _routeOverlay.RoutePlayerNameBox.Text = _settings.RoutePlayerName;
+        _routeOverlay.RouteAllowWaterCheck.IsChecked = _settings.RouteAllowWater;
+        _routeOverlay.RouteZoomLabel.Text = $"{_settings.RouteZoom * 100:F0}%";
+        _routeOverlay.RouteUseInGameMapCheck.IsChecked = _settings.RouteUseInGameMap;
+        _routeOverlay.RouteShowExtraNodesCheck.IsChecked = _settings.RouteShowExtraNodes;
+        _routeOverlay.RouteRoot.Background = _settings.RouteUseInGameMap ? Brushes.Transparent : RouteRootNormalBackground;
+        _routeOverlay.Show();
 
         // On a brand-new install, WebView2's first-ever startup (spinning up the
         // Edge runtime, creating the profile folder) can take a few seconds. Setting
@@ -168,8 +190,15 @@ public partial class MainWindow : Window
         {
             Left = _header.Left;
             Top = _header.Top + _header.Height;
+            _routeOverlay.Left = Left;
+            _routeOverlay.Top = Top;
         };
-        SizeChanged += (_, _) => _header.Width = Width;
+        SizeChanged += (_, _) =>
+        {
+            _header.Width = Width;
+            _routeOverlay.Width = Math.Max(Width - 14, 50);
+            _routeOverlay.Height = Height;
+        };
     }
 
     private void PositionOverGameWindow()
@@ -271,6 +300,18 @@ public partial class MainWindow : Window
         ClaimPanel.Visibility = tab == "Claim" ? Visibility.Visible : Visibility.Collapsed;
         RoutePanel.Visibility = tab == "Route" ? Visibility.Visible : Visibility.Collapsed;
         Browser.Visibility = tab is "Calc" or "Stats" or "Claim" or "Route" ? Visibility.Collapsed : Visibility.Visible;
+        _routeOverlay!.Visibility = tab == "Route" ? Visibility.Visible : Visibility.Collapsed;
+        _routeOverlay.ApplyOverlayState(tab == "Route");
+
+        // MainWindow itself must be HIDDEN (not just its RoutePanel content) while on the
+        // Route tab - RouteOverlayWindow floats in the exact same screen area, and if
+        // MainWindow is merely showing an empty placeholder there, that placeholder (an
+        // ordinary opaque window) is what Route's click-through/opacity would reveal -
+        // the game/desktop further behind never being reached. Confirmed empirically:
+        // the "see-through" effect was blending against this window's own dark
+        // background, not the desktop. HeaderWindow and RouteOverlayWindow are separate
+        // owned windows, so hiding the owner (this) doesn't hide them.
+        Visibility = tab == "Route" ? Visibility.Hidden : Visibility.Visible;
         if (tab is "Calc" or "Stats" or "Claim" or "Route")
         {
             if (tab == "Route") _ = EnsureRouteResourceListLoaded(); // lazy-load the resource catalog the first time the tab is shown
@@ -977,6 +1018,9 @@ public partial class MainWindow : Window
     private const double RouteBoxHalfSize = 200;
     private const int RouteMaxNodes = 40; // hard cap fed into pathfinding - ponytail: raise if a small box still overwhelms a dense resource
     private static readonly TimeSpan RouteResubscribeCooldown = TimeSpan.FromSeconds(5);
+    // Mapless mode (RouteUseInGameMap) skips the terrain crop draw entirely, so a redraw is
+    // cheap enough to run noticeably faster - full map mode keeps the original, heavier interval.
+    private TimeSpan RouteRecomputeInterval => TimeSpan.FromSeconds(_settings.RouteUseInGameMap ? 0.5 : 1.5);
     private const double RouteRedrawMinMove = 15; // world units - below this, a position update doesn't trigger a full map redraw
     private const double RouteZoomMin = 0.4, RouteZoomMax = 3.0, RouteZoomStep = 0.25;
 
@@ -986,26 +1030,28 @@ public partial class MainWindow : Window
         try
         {
             var types = await RouteApi.GetResourceTypesAsync();
-            RouteResourceCombo.ItemsSource = types;
-            RouteResourceCombo.SelectedItem = types.FirstOrDefault(t => t.Id == _settings.RouteLastResourceId) ?? types.FirstOrDefault();
+            _routeOverlay!.RouteResourceCombo.ItemsSource = types;
+            _routeOverlay.RouteResourceCombo.SelectedItem = types.FirstOrDefault(t => t.Id == _settings.RouteLastResourceId) ?? types.FirstOrDefault();
             _routeResourceListLoaded = true;
         }
         catch
         {
-            RouteStatusLabel.Text = "Couldn't load the resource list (no internet?).";
+            _routeOverlay!.RouteStatusLabel.Text = "Couldn't load the resource list (no internet?).";
         }
     }
 
-    private async void RouteFindPlayer_Click(object sender, RoutedEventArgs e)
+    // internal, not private: called from RouteOverlayWindow's forwarding handlers (see its
+    // own summary for why the Route XAML now lives in a separate window).
+    internal async void RouteFindPlayer_Click(object sender, RoutedEventArgs e)
     {
-        var name = RoutePlayerNameBox.Text.Trim();
+        var name = _routeOverlay!.RoutePlayerNameBox.Text.Trim();
         if (name.Length < 2)
         {
-            RoutePlayerFoundLabel.Text = "Type at least 2 characters.";
+            _routeOverlay.RoutePlayerFoundLabel.Text = "Type at least 2 characters.";
             return;
         }
-        RoutePlayerResultsList.Visibility = Visibility.Collapsed;
-        RoutePlayerFoundLabel.Text = "Searching...";
+        _routeOverlay.RoutePlayerResultsList.Visibility = Visibility.Collapsed;
+        _routeOverlay.RoutePlayerFoundLabel.Text = "Searching...";
         await RunBusy((Button)sender, "...", async () =>
         {
             try
@@ -1013,7 +1059,7 @@ public partial class MainWindow : Window
                 var matches = await BitjitaApi.SearchPlayersAsync(name);
                 if (matches.Count == 0)
                 {
-                    RoutePlayerFoundLabel.Text = "No player found.";
+                    _routeOverlay.RoutePlayerFoundLabel.Text = "No player found.";
                     return;
                 }
                 _settings.RoutePlayerName = name;
@@ -1024,27 +1070,27 @@ public partial class MainWindow : Window
                     : matches.FirstOrDefault(m => string.Equals(m.Username, name, StringComparison.OrdinalIgnoreCase));
                 if (exact is not null)
                 {
-                    RoutePlayerFoundLabel.Text = "";
+                    _routeOverlay.RoutePlayerFoundLabel.Text = "";
                     await SelectRoutePlayerAsync(exact.EntityId, exact.Username);
                 }
                 else
                 {
-                    RoutePlayerResultsList.ItemsSource = matches;
-                    RoutePlayerResultsList.Visibility = Visibility.Visible;
-                    RoutePlayerFoundLabel.Text = $"{matches.Count} matches - pick one.";
+                    _routeOverlay.RoutePlayerResultsList.ItemsSource = matches;
+                    _routeOverlay.RoutePlayerResultsList.Visibility = Visibility.Visible;
+                    _routeOverlay.RoutePlayerFoundLabel.Text = $"{matches.Count} matches - pick one.";
                 }
             }
             catch
             {
-                RoutePlayerFoundLabel.Text = "Search failed (no internet?).";
+                _routeOverlay.RoutePlayerFoundLabel.Text = "Search failed (no internet?).";
             }
         });
     }
 
-    private async void RoutePlayerResultsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    internal async void RoutePlayerResultsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (RoutePlayerResultsList.SelectedItem is not PlayerSearchResult picked) return;
-        RoutePlayerResultsList.Visibility = Visibility.Collapsed;
+        if (_routeOverlay!.RoutePlayerResultsList.SelectedItem is not PlayerSearchResult picked) return;
+        _routeOverlay.RoutePlayerResultsList.Visibility = Visibility.Collapsed;
         await SelectRoutePlayerAsync(picked.EntityId, picked.Username);
     }
 
@@ -1058,16 +1104,16 @@ public partial class MainWindow : Window
 
         _settings.RoutePlayerEntityId = entityId;
         _settings.Save();
-        RoutePlayerFoundLabel.Text = $"{username} - locating...";
-        RouteMapImage.Source = null;
-        RouteMapPlaceholder.Visibility = Visibility.Visible;
+        _routeOverlay!.RoutePlayerFoundLabel.Text = $"{username} - locating...";
+        _routeOverlay.RouteMapImage.Source = null;
+        _routeOverlay.RouteMapPlaceholder.Visibility = Visibility.Visible;
 
         try
         {
             var pos = await SpacetimeClient.FindPlayerPositionAsync(entityId, _settings.RoutePlayerRegion);
             if (pos is null)
             {
-                RoutePlayerFoundLabel.Text = $"{username} - not online live right now.";
+                _routeOverlay.RoutePlayerFoundLabel.Text = $"{username} - not online live right now.";
                 return;
             }
             _settings.RoutePlayerRegion = pos.Value.Region;
@@ -1083,8 +1129,8 @@ public partial class MainWindow : Window
             {
                 conn.RowsChanged += OnRouteRowsChanged;
                 conn.Disconnected += ex => Dispatcher.Invoke(() =>
-                    RoutePlayerFoundLabel.Text = $"{username} - live connection lost ({ex.Message}).");
-                conn.QueryFailed += msg => Dispatcher.Invoke(() => RouteStatusLabel.Text = $"Query failed: {msg}");
+                    _routeOverlay.RoutePlayerFoundLabel.Text = $"{username} - live connection lost ({ex.Message}).");
+                conn.QueryFailed += msg => Dispatcher.Invoke(() => _routeOverlay.RouteStatusLabel.Text = $"Query failed: {msg}");
             }
 
             _routePlayerLive = new SpacetimeLiveConnection();
@@ -1096,7 +1142,7 @@ public partial class MainWindow : Window
             WireCommonEvents(_routeLive);
             await _routeLive.ConnectAsync(pos.Value.Region);
 
-            _routeRecomputeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
+            _routeRecomputeTimer = new DispatcherTimer { Interval = RouteRecomputeInterval };
             _routeRecomputeTimer.Tick += (_, _) =>
             {
                 if (_routePendingRecenter is { } pending && DateTime.UtcNow - _routeLastResubscribe >= RouteResubscribeCooldown)
@@ -1111,18 +1157,18 @@ public partial class MainWindow : Window
             _routeRecomputeTimer.Start();
 
             await ResubscribeRouteQueriesAsync();
-            RoutePlayerFoundLabel.Text = $"{username} - live (region {pos.Value.Region}).";
+            _routeOverlay.RoutePlayerFoundLabel.Text = $"{username} - live (region {pos.Value.Region}).";
             _routeDirty = true;
         }
         catch (Exception ex)
         {
-            RoutePlayerFoundLabel.Text = $"{username} - live tracking failed: {ex.Message}";
+            _routeOverlay.RoutePlayerFoundLabel.Text = $"{username} - live tracking failed: {ex.Message}";
         }
     }
 
-    private async void RouteResourceCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    internal async void RouteResourceCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (RouteResourceCombo.SelectedItem is ResourceType resource)
+        if (_routeOverlay!.RouteResourceCombo.SelectedItem is ResourceType resource)
         {
             _settings.RouteLastResourceId = resource.Id;
             _settings.Save();
@@ -1130,20 +1176,36 @@ public partial class MainWindow : Window
         if (_routeLive is not null) await ResubscribeRouteQueriesAsync();
     }
 
-    private void RouteAllowWaterCheck_Changed(object sender, RoutedEventArgs e)
+    internal void RouteAllowWaterCheck_Changed(object sender, RoutedEventArgs e)
     {
-        _settings.RouteAllowWater = RouteAllowWaterCheck.IsChecked == true;
+        _settings.RouteAllowWater = _routeOverlay!.RouteAllowWaterCheck.IsChecked == true;
         _settings.Save();
         _routeDirty = true;
     }
 
-    private void RouteZoomIn_Click(object sender, RoutedEventArgs e) => AdjustRouteZoom(-RouteZoomStep);
-    private void RouteZoomOut_Click(object sender, RoutedEventArgs e) => AdjustRouteZoom(RouteZoomStep);
+    internal void RouteUseInGameMapCheck_Changed(object sender, RoutedEventArgs e)
+    {
+        _settings.RouteUseInGameMap = _routeOverlay!.RouteUseInGameMapCheck.IsChecked == true;
+        _settings.Save();
+        _routeOverlay.RouteRoot.Background = _settings.RouteUseInGameMap ? Brushes.Transparent : RouteRootNormalBackground;
+        if (_routeRecomputeTimer is not null) _routeRecomputeTimer.Interval = RouteRecomputeInterval;
+        _routeDirty = true;
+    }
+
+    internal void RouteShowExtraNodesCheck_Changed(object sender, RoutedEventArgs e)
+    {
+        _settings.RouteShowExtraNodes = _routeOverlay!.RouteShowExtraNodesCheck.IsChecked == true;
+        _settings.Save();
+        _routeDirty = true;
+    }
+
+    internal void RouteZoomIn_Click(object sender, RoutedEventArgs e) => AdjustRouteZoom(-RouteZoomStep);
+    internal void RouteZoomOut_Click(object sender, RoutedEventArgs e) => AdjustRouteZoom(RouteZoomStep);
 
     private void AdjustRouteZoom(double delta)
     {
         _settings.RouteZoom = Math.Clamp(_settings.RouteZoom + delta, RouteZoomMin, RouteZoomMax);
-        RouteZoomLabel.Text = $"{_settings.RouteZoom * 100:F0}%";
+        _routeOverlay!.RouteZoomLabel.Text = $"{_settings.RouteZoom * 100:F0}%";
         _settings.Save();
         _routeDirty = true;
     }
@@ -1162,7 +1224,7 @@ public partial class MainWindow : Window
         // OnRouteRowsChanged runs on the connection's background thread, where touching a WPF
         // control (RouteResourceCombo.SelectedItem) would throw - stash the selection here on
         // the UI thread instead, for that handler to read.
-        _routeActiveResource = RouteResourceCombo.SelectedItem as ResourceType;
+        _routeActiveResource = _routeOverlay!.RouteResourceCombo.SelectedItem as ResourceType;
 
         var queries = new List<string>();
         if (_routeActiveResource is { Kind: ResourceKind.Resource } resource && _routeBoxCenter is { } center)
@@ -1276,12 +1338,12 @@ public partial class MainWindow : Window
     {
         if (_routePlayerPos is not { } player)
         {
-            RouteMapImage.Source = null;
-            RouteMapPlaceholder.Visibility = Visibility.Visible;
+            _routeOverlay!.RouteMapImage.Source = null;
+            _routeOverlay.RouteMapPlaceholder.Visibility = Visibility.Visible;
             return;
         }
 
-        var resource = RouteResourceCombo.SelectedItem as ResourceType;
+        var resource = _routeOverlay!.RouteResourceCombo.SelectedItem as ResourceType;
         // Cap to the nearest RouteMaxNodes within a bounded radius before clustering/pathfinding.
         // Resource nodes are already geographically boxed server-side (see
         // ResubscribeRouteQueriesAsync), but creatures (enemy_mob_monitor_state) are NOT - the
@@ -1312,7 +1374,7 @@ public partial class MainWindow : Window
             // Water avoidance is a checkbox, not automatic - fishing/water-based gathering needs
             // to walk straight through it, so the Euclidean distance is used as-is in that case
             // instead of routing around.
-            var avoidWater = RouteAllowWaterCheck.IsChecked != true;
+            var avoidWater = _routeOverlay!.RouteAllowWaterCheck.IsChecked != true;
             Func<RouteNode, RouteNode, double> distance = avoidWater
                 ? (a, b) => TerrainMap.PathDistance(a.X, a.Z, b.X, b.Z)
                 : (a, b) => Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Z - b.Z) * (a.Z - b.Z));
@@ -1347,16 +1409,16 @@ public partial class MainWindow : Window
             // square render only filled that without black letterbox bars by coincidence.
             var outputWidth = (int)Math.Max(RoutePanel.ActualWidth, 50);
             var outputHeight = (int)Math.Max(RoutePanel.ActualHeight, 50);
-            var image = RouteMapRenderer.Render(route, hasEnd: false, avoidWater, extras, outputWidth, outputHeight, _settings.RouteZoom);
-            RouteMapImage.Source = image;
-            RouteMapPlaceholder.Visibility = image is null ? Visibility.Visible : Visibility.Collapsed;
-            RouteStatusLabel.Text = resource is null
+            var image = RouteMapRenderer.Render(route, hasEnd: false, avoidWater, _settings.RouteShowExtraNodes ? extras : null, outputWidth, outputHeight, _settings.RouteZoom, _settings.RouteUseInGameMap);
+            _routeOverlay.RouteMapImage.Source = image;
+            _routeOverlay.RouteMapPlaceholder.Visibility = image is null ? Visibility.Visible : Visibility.Collapsed;
+            _routeOverlay.RouteStatusLabel.Text = resource is null
                 ? "Live position - pick a resource to see nodes and a route."
                 : $"Live - {nearby.Count} {resource.Name} node(s) nearby ({route.Count - 1} routed).";
         }
         catch (Exception ex)
         {
-            RouteStatusLabel.Text = $"Couldn't render the route: {ex.Message}";
+            _routeOverlay.RouteStatusLabel.Text = $"Couldn't render the route: {ex.Message}";
         }
     }
 
@@ -1384,18 +1446,18 @@ public partial class MainWindow : Window
         _routeResourceEntityIds.Clear();
     }
 
-    private void RouteToggleSetup_Click(object sender, RoutedEventArgs e)
+    internal void RouteToggleSetup_Click(object sender, RoutedEventArgs e)
     {
-        var collapse = RouteSetupBody.Visibility == Visibility.Visible;
-        RouteSetupBody.Visibility = collapse ? Visibility.Collapsed : Visibility.Visible;
-        RouteToggleSetupButton.Content = collapse ? "+" : "–";
+        var collapse = _routeOverlay!.RouteSetupBody.Visibility == Visibility.Visible;
+        _routeOverlay.RouteSetupBody.Visibility = collapse ? Visibility.Collapsed : Visibility.Visible;
+        _routeOverlay.RouteToggleSetupButton.Content = collapse ? "+" : "–";
     }
 
     // --- Settings -----------------------------------------------------------
 
     internal async void OpenSettings(Window owner)
     {
-        var dialog = new SettingsWindow(_settings.BitcraftSyncShareCode, _settings.CustomTabUrl, _settings.HiddenTabs, _settings.UseIconTabs) { Owner = owner };
+        var dialog = new SettingsWindow(_settings.BitcraftSyncShareCode, _settings.CustomTabUrl, _settings.HiddenTabs, _settings.UseIconTabs, _settings.RouteClickThrough, _settings.RouteOpacity) { Owner = owner };
         if (dialog.ShowDialog() == true)
         {
             // Route's live tracking (two persistent WebSocket connections + a recompute timer)
@@ -1410,11 +1472,14 @@ public partial class MainWindow : Window
             _settings.CustomTabUrl = dialog.CustomUrl;
             _settings.HiddenTabs = dialog.HiddenTabs;
             _settings.UseIconTabs = dialog.UseIconTabs;
+            _settings.RouteClickThrough = dialog.RouteClickThrough;
+            _settings.RouteOpacity = dialog.RouteOpacity;
+            _routeOverlay?.ApplyOverlayState(_currentTab == "Route"); // live-update immediately if already on the Route tab
             if (routeJustHidden)
             {
                 await DisconnectRouteLiveAsync();
                 TerrainMap.Unload();
-                RouteMapImage.Source = null;
+                _routeOverlay!.RouteMapImage.Source = null;
                 // Dropping references makes the terrain bitmap/live-tracking dictionaries
                 // eligible for collection, but .NET doesn't necessarily reclaim that memory (or
                 // hand it back to the OS) right away on its own schedule - forcing a collection
