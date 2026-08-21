@@ -1,0 +1,25 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <Version>0.3.2</Version>
+    <Company>Nowak Administrators Sp. z o.o.</Company>
+    <Authors>Nowak Administrators Sp. z o.o.</Authors>
+    <Product>BitCraft Overlay</Product>
+    <Copyright>Copyright © Nowak Administrators Sp. z o.o.</Copyright>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4129.50" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\icons\*.ico" />
+    <Resource Include="Assets\icons\*.png" />
+  </ItemGroup>
+
+</Project>

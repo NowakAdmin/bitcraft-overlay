@@ -1,0 +1,83 @@
+<Window x:Class="BitCraftOverlay.HeaderWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        Topmost="True"
+        ShowInTaskbar="False"
+        Background="#2D2D2D"
+        Foreground="White"
+        Height="28" Width="420">
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="0" GlassFrameThickness="0" ResizeBorderThickness="0" CornerRadius="0"/>
+    </shell:WindowChrome.WindowChrome>
+    <Window.Resources>
+        <!-- The default Windows button template ignores Foreground for its text in
+             some themes (renders black regardless) - this bare template fixes that
+             and adds a subtle hover instead. Applies to every Button in this window. -->
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Opacity" Value="0.75"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    <!-- Always fully opaque, regardless of the content window's transparency setting,
+         so the user can never slider their way into losing access to these controls. -->
+    <Grid Background="Transparent"
+          MouseLeftButtonDown="Header_MouseLeftButtonDown"
+          MouseLeftButtonUp="Header_MouseLeftButtonUp"
+          MouseMove="Header_MouseMove">
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+            <Button x:Name="TabBitcraftSync" Content="BitcraftSync" Padding="8,0" Height="28" Click="Tab_Click"
+                    Background="Transparent" Foreground="White" BorderThickness="0"/>
+            <Button x:Name="TabBitjita" Content="Bitjita" Padding="8,0" Height="28" Click="Tab_Click"
+                    Background="Transparent" Foreground="White" BorderThickness="0"/>
+            <Button x:Name="TabBrico" Content="Brico" Padding="8,0" Height="28" Click="Tab_Click"
+                    Background="Transparent" Foreground="White" BorderThickness="0"/>
+            <Button x:Name="TabMapa" Content="Map" Padding="8,0" Height="28" Click="Tab_Click"
+                    Background="Transparent" Foreground="White" BorderThickness="0"/>
+            <Button x:Name="TabCalc" Content="Calc" Padding="8,0" Height="28" Click="Tab_Click"
+                    ToolTip="Start/stop rate calculator (e.g. XP per hour)"
+                    Background="Transparent" Foreground="White" BorderThickness="0"/>
+            <Button x:Name="TabStats" Content="Stats" Padding="8,0" Height="28" Click="Tab_Click"
+                    ToolTip="Player XP/inventory snapshots and tool power log (from bitjita.com)"
+                    Background="Transparent" Foreground="White" BorderThickness="0"/>
+            <Button x:Name="TabClaim" Content="Claim" Padding="8,0" Height="28" Click="Tab_Click"
+                    ToolTip="Claim/settlement member list, skills, and armor loadouts (from bitjita.com)"
+                    Background="Transparent" Foreground="White" BorderThickness="0"/>
+            <Button x:Name="TabRoute" Content="Route" Padding="8,0" Height="28" Click="Tab_Click"
+                    ToolTip="Gathering route planner - optimal order to visit nearby resource nodes"
+                    Background="Transparent" Foreground="White" BorderThickness="0"/>
+            <Button x:Name="TwitchButton" Content="Twitch" Padding="8,0" Height="28" Margin="4,0,0,0" Click="Twitch_Click"
+                    ToolTip="Open twitch.tv/bitcraftonline in a separate window (watch the stream, collect drops)"
+                    Background="Transparent" Foreground="White" BorderThickness="0"/>
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="▭" Width="28" Height="28" Click="ResetSize_Click" ToolTip="Reset to default size"
+                    Background="Transparent" Foreground="White" BorderThickness="0" FontSize="11"/>
+            <Button Content="–" Width="28" Height="28" Click="Minimize_Click" ToolTip="Collapse"
+                    Background="Transparent" Foreground="White" BorderThickness="0" FontSize="16"/>
+            <Button Content="⚙" Width="28" Height="28" Click="Settings_Click"
+                    Background="Transparent" Foreground="White" BorderThickness="0"/>
+            <Button Content="✕" Width="28" Height="28" Click="Close_Click"
+                    Background="Transparent" Foreground="White" BorderThickness="0"/>
+        </StackPanel>
+    </Grid>
+</Window>
